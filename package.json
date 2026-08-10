@@ -1,0 +1,27 @@
+{
+  "name": "motek-store",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "description": "Motek Store — monorepo (apps/web, apps/api, packages/{domain,database,types}).",
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "type-check": "turbo type-check",
+    "db:migrate": "pnpm --filter @motek/database migrate:dev",
+    "db:seed": "pnpm --filter @motek/database seed",
+    "db:studio": "pnpm --filter @motek/database studio",
+    "db:generate": "pnpm --filter @motek/database generate",
+    "db:catalog": "pnpm --filter @motek/database catalog",
+    "db:moto-compat": "pnpm --filter @motek/database moto-compat"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=20.10.0",
+    "pnpm": ">=9.0.0"
+  }
+}

@@ -1,0 +1,16 @@
+# Normaliza todos los archivos de texto a LF en el repositorio.
+# Esto evita que Windows (autocrlf=true) marque archivos como modificados
+# sin tener cambios reales de contenido.
+* text=auto eol=lf
+
+# Archivos binarios — sin conversión
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
