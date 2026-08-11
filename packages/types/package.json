@@ -1,0 +1,21 @@
+{
+  "name": "@motek/types",
+  "version": "0.0.0",
+  "private": true,
+  "description": "DTOs y tipos de request/response compartidos entre apps/web (ApiClient) y apps/api (NestJS controllers).",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "type-check": "tsc -p tsconfig.json --noEmit",
+    "lint": "echo \"(no lint for @motek/types yet)\""
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}
