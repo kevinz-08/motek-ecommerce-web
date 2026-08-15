@@ -1,0 +1,447 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum Role {
+  ADMIN
+  CUSTOMER
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+}
+
+enum PaymentProvider {
+  WOMPI
+  MERCADO_PAGO
+  COD
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  DECLINED
+  VOIDED
+  ERROR
+}
+
+/// Método de entrega elegido en el checkout.
+///   HOME_DELIVERY — envío a domicilio vía Vendelo (comportamiento histórico).
+///   STORE_PICKUP  — el cliente retira en la tienda física; el flete siempre es $0
+///                   y el pedido nunca se encola en Vendelo.
+enum DeliveryMethod {
+  HOME_DELIVERY
+  STORE_PICKUP
+}
+
+enum CouponType {
+  PERCENTAGE // value = puntos base (1000 = 10.00%)
+  FIXED      // value = centavos COP
+}
+
+enum CouponRestriction {
+  NONE              // sin restricción — cualquier cliente durante la vigencia
+  ONCE_PER_CUSTOMER // cada cliente puede usarlo solo una vez
+  FIRST_PURCHASE    // solo clientes sin órdenes aprobadas previas
+}
+
+// ─── NextAuth.js required models ─────────────────────────────────────────────
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ─── Core models ─────────────────────────────────────────────────────────────
+
+model User {
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  name                String?
+  image               String?
+  /// Contraseña hasheada con bcrypt. Null para usuarios OAuth (Google).
+  password            String?
+  role                Role                 @default(CUSTOMER)
+  /// Null mientras el usuario no haya verificado su email. Requerido por PrismaAdapter de NextAuth.
+  emailVerified       DateTime?
+  createdAt           DateTime             @default(now())
+  /// Timestamp de aceptación de T&C + Política de Privacidad. Null = nunca aceptó explícitamente.
+  acceptedTermsAt     DateTime?
+  /// Versión del documento aceptado. Permite detectar si el usuario debe re-aceptar tras una actualización.
+  acceptedTermsVersion String?
+  /// Consentimiento para recibir comunicaciones de marketing (separado del consentimiento de T&C — Ley 1581/2012).
+  marketingConsent    Boolean              @default(false)
+  marketingConsentAt  DateTime?
+  accounts            Account[]
+  sessions            Session[]
+  orders              Order[]
+  passwordResetTokens PasswordResetToken[]
+  emailOtps           EmailOtp[]
+}
+
+/// Código OTP de 6 dígitos para verificación de email al registrarse.
+/// Se almacena el SHA-256 del código, nunca el código en claro.
+/// Expira en 10 minutos. Máximo 5 intentos fallidos antes de invalidarse.
+model EmailOtp {
+  id        String    @id @default(cuid())
+  userId    String
+  codeHash  String
+  expiresAt DateTime
+  usedAt    DateTime?
+  attempts  Int       @default(0)
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  /// SHA-256 del token crudo enviado por email. Nunca almacenamos el token en claro.
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Category {
+  id          String     @id @default(cuid())
+  name        String
+  slug        String     @unique
+  description String?
+  imageUrl    String?
+  /// null  → categoría raíz (padre)
+  /// non-null → subcategoría; apunta al id del padre
+  parentId    String?
+  parent      Category?  @relation("CategoryTree", fields: [parentId], references: [id])
+  children    Category[] @relation("CategoryTree")
+  products    Product[]
+  coupons     Coupon[]   @relation("CategoryCoupons")
+}
+
+model Product {
+  id                    String                    @id @default(cuid())
+  name                  String
+  slug                  String                    @unique
+  description           String                    @db.Text
+  price                 Int                       // centavos COP
+  stock                 Int                       @default(0)
+  sku                   String                    @unique
+  images                String[]
+  isActive              Boolean                   @default(true)
+  /// Peso real del producto embalado — usado en cotización y creación de pedido Vendelo.
+  /// Null hasta que un admin lo cargue; VendeloService cae a VENDELO_DEFAULT_WEIGHT_KG.
+  weightKg              Float?
+  heightCm              Int?
+  widthCm               Int?
+  lengthCm              Int?
+  categoryId            String
+  createdAt             DateTime                  @default(now())
+  updatedAt             DateTime                  @updatedAt
+  /// null = activo en BD. Non-null = soft-deleted (borrado desde el panel admin).
+  /// Usar softDelete(id) en el repositorio — nunca prisma.product.delete().
+  deletedAt             DateTime?
+  category              Category                  @relation(fields: [categoryId], references: [id])
+  compatible            MotorcycleCompatibility[]
+  orderItems            OrderItem[]
+  structuredDescription ProductDescription?
+  coupons               Coupon[]                  @relation("ProductCoupons")
+
+  /// Cubre el filtro mas comun del catalogo y del admin: por categoria, activos, con stock.
+  @@index([categoryId, isActive, stock])
+  /// Cubre listados ordenados por fecha (mas recientes primero) filtrando solo activos.
+  @@index([isActive, createdAt])
+  /// Cubre el filtro de papelera y excluye soft-deleted de todas las queries normales.
+  @@index([deletedAt])
+}
+
+model ProductDescription {
+  id                 String                      @id @default(cuid())
+  productId          String                      @unique
+  generalDescription String?                     @db.Text
+  product            Product                     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  benefits           ProductBenefit[]
+  compatibility      ProductCompatibilityItem[]
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+
+  @@index([productId])
+}
+
+model ProductBenefit {
+  id            String             @id @default(cuid())
+  descriptionId String
+  title         String?
+  body          String             @db.Text
+  order         Int                @default(0)
+  description   ProductDescription @relation(fields: [descriptionId], references: [id], onDelete: Cascade)
+
+  @@index([descriptionId, order])
+}
+
+/// Compatibilidad con motos como texto libre (ej. "Honda CB160F 2020-2023"),
+/// escrito a mano por el admin — no reemplaza a MotorcycleCompatibility, que
+/// queda sin uso por ahora (sin escritura implementada en ningún flujo).
+model ProductCompatibilityItem {
+  id            String             @id @default(cuid())
+  descriptionId String
+  body          String             @db.Text
+  order         Int                @default(0)
+  description   ProductDescription @relation(fields: [descriptionId], references: [id], onDelete: Cascade)
+
+  @@index([descriptionId, order])
+}
+
+model MotorcycleCompatibility {
+  id        String  @id @default(cuid())
+  productId String
+  brand     String
+  model     String
+  year      Int?
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model Order {
+  id                 String          @id @default(cuid())
+  userId             String
+  status             OrderStatus     @default(PENDING)
+  /// centavos COP — total cobrado/adeudado: subtotal de productos + shippingTotal
+  /// cuando el flete se cobró en línea (ver shippingTotal). Para COD o cuando el
+  /// flete no se cobra en línea, es solo el subtotal de productos.
+  total              Int
+  /// centavos COP — componente de flete incluido en `total`. 0 = el negocio absorbió
+  /// el flete (pedido COD, toggle SHIPPING_ONLINE_ENABLED desactivado, o falla al
+  /// cotizar — ver CreateOrder.execute()).
+  shippingTotal      Int             @default(0)
+  shippingAddress    Json
+  /// Método de entrega elegido en el checkout. STORE_PICKUP fuerza shippingTotal=0
+  /// y excluye el pedido de la cola de envíos Vendelo (VendeloOrderQueueService).
+  deliveryMethod     DeliveryMethod  @default(HOME_DELIVERY)
+  paymentProvider    PaymentProvider
+  /// ID del pedido creado en Vendelo API. Null hasta que VendeloOrderQueueService lo procesa.
+  vendeloOrderId     String?
+  /// Timestamp del momento exacto en que el usuario marcó el checkbox de políticas en el checkout.
+  /// Evidencia inmutable para disputas legales o auditorías de la SIC.
+  policiesAcceptedAt DateTime?
+  /// Tipo de documento del comprador. Requerido para generar el comprobante de venta
+  /// y como identificación válida en el pedido Vendelo (reemplaza el hack del teléfono).
+  /// Valores: CC | CE | NIT | PASAPORTE
+  buyerIdType        String          @default("CC")
+  /// Número del documento del comprador. Texto porque NIT incluye dígito de verificación
+  /// (ej. "900123456-7") y CE puede contener letras.
+  buyerIdNumber      String          @default("")
+  /// Razón social — solo aplica cuando buyerIdType es NIT (compras B2B).
+  buyerBusinessName  String?
+  /// Código del cupón aplicado en esta orden. Se preserva como audit trail
+  /// aunque el cupón sea desactivado posteriormente.
+  couponCode         String?
+  /// centavos COP — monto descontado por el cupón. 0 si no se aplicó cupón.
+  discountAmount     Int             @default(0)
+  createdAt          DateTime        @default(now())
+  user               User            @relation(fields: [userId], references: [id])
+  coupon             Coupon?         @relation(fields: [couponCode], references: [code])
+  items              OrderItem[]
+  payment            Payment?
+  shipment           Shipment?
+
+  /// Cubre el filtro de /admin/pedidos y las agregaciones de ingresos del dashboard
+  /// (getTodayRevenue, getMonthRevenue, getRevenueSeries), que siempre filtran por
+  /// status y ordenan/agrupan por createdAt.
+  @@index([status, createdAt])
+}
+
+/// Envío asociado a un pedido. Se crea cuando Vendelo dispara el primer webhook
+/// del Chatbot Connection (ORDER_SHIPPED, SHIPMENT_STATUS_UPDATED, etc.).
+/// Relación 1:1 con Order.
+model Shipment {
+  id             String   @id @default(cuid())
+  orderId        String   @unique
+  /// Estado del envío — mapeado desde los eventos del Chatbot Connection de Vendelo.
+  /// PENDING | READY | PREPARING | SHIPPED | INCIDENT | DELIVERED | RETURNED | CANCELLED
+  status         String   @default("PENDING")
+  trackingNumber String?
+  carrier        String?
+  labelUrl       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+}
+
+model OrderItem {
+  id              String  @id @default(cuid())
+  orderId         String
+  productId       String
+  quantity        Int
+  priceAtPurchase Int     // centavos COP — precio al momento de la compra
+  order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product         Product @relation(fields: [productId], references: [id])
+}
+
+model Payment {
+  id         String          @id @default(cuid())
+  orderId    String          @unique
+  provider   PaymentProvider
+  externalId String?         // ID de la transacción en Wompi / Mercado Pago
+  status     PaymentStatus   @default(PENDING)
+  amount     Int             // centavos COP
+  createdAt  DateTime        @default(now())
+  order      Order           @relation(fields: [orderId], references: [id])
+}
+
+/// Códigos promocionales administrados desde /admin/cupones.
+/// El scope del cupón es excluyente: exactamente uno de categoryId o productId
+/// debe ser no-null (validado en el DTO de NestJS, no en el schema).
+///   categoryId → aplica a todos los productos de esa categoría y sus subcategorías.
+///   productId  → aplica solo a ese producto específico.
+/// La expiración se evalúa de forma lazy en ValidateCoupon — no hay cron job.
+/// Soft delete: nunca se borra una fila; isActive=false la desactiva manualmente.
+model Coupon {
+  id          String            @id @default(cuid())
+  code        String            @unique
+  type        CouponType
+  /// PERCENTAGE: puntos base (1000 = 10.00%). FIXED: centavos COP.
+  value       Int
+  restriction CouponRestriction @default(NONE)
+  isActive    Boolean           @default(true)
+  expiresAt   DateTime
+  createdAt   DateTime          @default(now())
+
+  /// Scope: categoría (incluye subcategorías vía parentId) o producto específico.
+  categoryId  String?
+  productId   String?
+  category    Category? @relation("CategoryCoupons", fields: [categoryId], references: [id])
+  product     Product?  @relation("ProductCoupons", fields: [productId], references: [id])
+
+  orders      Order[]
+
+  @@index([code])
+  @@index([isActive, expiresAt])
+}
+
+model Settings {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
+
+model EmailQueue {
+  id        String   @id @default(cuid())
+  to        String
+  orderId   String
+  attempts  Int      @default(0)
+  lastError String?
+  /// PENDING | SENT | FAILED
+  status    String   @default("PENDING")
+  createdAt DateTime @default(now())
+  nextRetry DateTime @default(now())
+
+  @@index([status, nextRetry])
+}
+
+/// Cola de órdenes pendientes de crear en Vendelo API.
+/// Se crea una entrada cuando un pago se confirma (APPROVED).
+/// VendeloOrderQueueService la procesa cada 2 min con backoff exponencial (5s→30s→120s).
+model VendeloOrderQueue {
+  id                  String    @id @default(cuid())
+  orderId             String
+  attempts            Int       @default(0)
+  lastError           String?
+  /// PENDING | PROCESSING | SENT | FAILED
+  status              String    @default("PENDING")
+  createdAt           DateTime  @default(now())
+  nextRetry           DateTime  @default(now())
+  /// Marca de tiempo en que un worker reclamó la fila (status=PROCESSING).
+  /// El sweeper la libera (vuelve a PENDING) si pasan más de 5 min sin avance —
+  /// cubre el caso de un contenedor Cloud Run que crashea a mitad de proceso.
+  processingStartedAt DateTime?
+
+  @@index([status, nextRetry])
+}
+
+/// Banners del carrusel Hero en la home, administrables desde /admin/banners.
+/// El orden de aparición lo define `order`; solo los `isActive` se muestran en el sitio público.
+model HeroBanner {
+  id            String   @id @default(cuid())
+  /// URL optimizada de Cloudinary (secure_url), no el public_id crudo. Recurso desktop
+  /// (también usado como fallback en mobile si imageUrlMobile no está definido).
+  imageUrl      String
+  /// public_id de Cloudinary — se conserva para poder borrar la imagen del CDN
+  /// cuando se elimina o reemplaza el banner (evita huérfanos, a diferencia de Product.images).
+  imagePublicId String
+  /// Recurso optimizado para mobile (recorte/peso distinto al desktop). Opcional:
+  /// si es null, el carrusel usa `imageUrl` en todos los breakpoints.
+  imageUrlMobile      String?
+  imagePublicIdMobile String?
+  title         String
+  description   String?
+  ctaLabel      String?
+  ctaUrl        String?
+  order         Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([isActive, order])
+}
+
+/// Catálogo de ciudades colombianas con sus códigos Vendelo.
+/// Se pobla via POST /admin/vendelo/sync-cities y se cachea 24h en el checkout.
+model VendeloCity {
+  /// Código DIVIPOLA de 8 dígitos. Ej: "05001000" = Medellín
+  code            String @id
+  name            String
+  /// Código de subdivisión dentro de la ciudad. Ej: "02"
+  subdivisionCode String
+  countryCode     String @default("CO")
+
+  @@index([name])
+}
