@@ -1,0 +1,29 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "noEmit": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "strictPropertyInitialization": false,
+    "paths": {
+      "@motek/domain": ["../../packages/domain/src"],
+      "@motek/database": ["../../packages/database/src"],
+      "@motek/types": ["../../packages/types/src"],
+      "@/domain/*": ["../../packages/domain/src/*"]
+    }
+  },
+  "include": [
+    "src/**/*.ts",
+    "../../packages/domain/src/**/*.ts",
+    "../../packages/database/src/index.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "../../packages/database/src/generated/**"
+  ]
+}
