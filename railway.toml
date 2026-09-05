@@ -1,0 +1,10 @@
+[build]
+builder = "nixpacks"
+buildCommand = "pnpm install --frozen-lockfile && pnpm --filter @motek/database generate && pnpm --filter @motek/api build"
+
+[deploy]
+startCommand = "node apps/api/dist/main.js"
+healthcheckPath = "/products"
+healthcheckTimeout = 60
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
