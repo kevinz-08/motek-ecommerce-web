@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'sprint*', 'hotfix*', 'fix*', 'feat*']
+  pull_request:
+    branches: [main]
+
+env:
+  # Prisma generate reads the schema — it needs DATABASE_URL defined but never connects in CI.
+  DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+
+jobs:
+  # ── Lint ──────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Lint
+        run: pnpm lint
+
+  # ── Type-check ────────────────────────────────────────────────────────────────
+  type-check:
+    name: Type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Type-check
+        run: pnpm type-check
+
+  # ── Tests ─────────────────────────────────────────────────────────────────────
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Test — domain
+        run: pnpm --filter @motek/domain test
+
+      - name: Test — api
+        run: pnpm --filter @motek/api test
+
+  # ── Build validation ──────────────────────────────────────────────────────────
+  # Nota: el build completo de Next.js requiere variables de entorno reales
+  # (DATABASE_URL válida para SSR, NEXTAUTH_SECRET, etc.) que no están disponibles
+  # en CI. La validación del build de producción se delega a Vercel (web) y
+  # Cloud Run (api), que tienen acceso a las variables reales.
+  #
+  # Este job valida únicamente que el build de NestJS (apps/api) no falla,
+  # ya que solo necesita compilar TypeScript sin conectarse a ningún servicio.
+  build-api:
+    name: Build API
+    runs-on: ubuntu-latest
+    needs: [lint, type-check, test]
+    env:
+      NODE_ENV: production
+      JWT_SECRET: ci-secret-placeholder-32-characters-min
+      INTERNAL_API_SECRET: ci-secret-placeholder-32-characters-min
+      WOMPI_EVENTS_SECRET: ci-placeholder
+      WOMPI_INTEGRITY_SECRET: ci-placeholder
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --prod=false
+
+      - name: Generate Prisma client
+        run: pnpm db:generate
+
+      - name: Build API
+        run: pnpm --filter @motek/api build
+
+  # ── Deploy to Cloud Run ───────────────────────────────────────────────────
+  # TODO: pendiente de configurar para Motek Store — proyecto GCP, Artifact
+  # Registry, Workload Identity Federation y GitHub Secrets propios (ver
+  # checklist de desvinculación de infraestructura). Job removido
+  # intencionalmente por ahora en vez de dejarlo apuntando al proyecto/servicio
+  # de Motek Store.
