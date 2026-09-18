@@ -5,6 +5,7 @@
  * Los use cases CreateOrder y ConfirmPayment dependen de esta interfaz.
  */
 import { Order, OrderStatus, OrderItem, ShippingAddress, BuyerInfo, PaymentProvider, PaymentStatus, DeliveryMethod } from '@/domain/entities/Order'
+import { OrderCustomer } from '@/domain/entities/Customer'
 import { ShipmentStatus } from '@/domain/entities/Shipment'
 
 /**
@@ -23,8 +24,13 @@ export interface PaymentTransitionResult {
  * Los items ya incluyen el priceAtPurchase (precio capturado por CreateOrder use case).
  */
 export interface CreateOrderInput {
-  /** ID del usuario autenticado que realiza el pedido */
-  userId: string
+  /**
+   * Identidad del comprador. `kind: 'user'` referencia un User existente;
+   * `kind: 'guest'` hace que la implementación cree el GuestCustomer dentro de
+   * la MISMA transacción que el pedido (nunca antes: un fallo al crear el pedido
+   * no debe dejar invitados huérfanos en la BD).
+   */
+  customer: OrderCustomer
   /** Lista de ítems con precio capturado en el momento de la compra */
   items: Array<{ productId: string; quantity: number; priceAtPurchase: number }>
   /** Dirección de envío — se serializa como JSON en la BD */
@@ -93,6 +99,37 @@ export interface IOrderRepository {
       stockDecrements?: Array<{ productId: string; quantity: number }>
     },
   ): Promise<PaymentTransitionResult>
+  /**
+   * Busca un pedido por su `trackingToken` — la vía de acceso del comprador
+   * invitado, que no tiene sesión. Devuelve el pedido con items y pago incluidos.
+   *
+   * El token es una credencial: la implementación NO debe loguearlo, y el caller
+   * debe responder 404 genérico (nunca "token inválido" vs "pedido borrado").
+   */
+  findByTrackingToken(token: string): Promise<Order | null>
+  /**
+   * Pedidos de invitado (userId IS NULL) cuyo `contactEmail` coincide con el dado.
+   * Usado por ClaimGuestOrders y por el envío de links de seguimiento.
+   *
+   * La comparación de email es case-insensitive: el comprador puede haber escrito
+   * "Juan@Gmail.com" en el checkout y loguearse luego con "juan@gmail.com".
+   */
+  findUnclaimedByEmail(email: string): Promise<Order[]>
+  /**
+   * Vincula a `userId` todos los pedidos de invitado con ese `contactEmail`
+   * (userId IS NULL). Transición de una sola dirección: guestId pasa a null.
+   * Devuelve cuántos pedidos se reclamaron. Idempotente — una segunda llamada
+   * devuelve 0 porque ya no quedan filas con userId IS NULL.
+   */
+  claimOrders(email: string, userId: string): Promise<number>
+  /**
+   * Cuenta pedidos PENDING creados por ese email de contacto desde `since`.
+   *
+   * Freno anti-abuso del checkout de invitado: el ThrottlerGuard limita por IP,
+   * pero no ve un ataque distribuido sobre muchas IPs. El email de contacto es
+   * el otro eje barato de limitar.
+   */
+  countPendingByEmailSince(email: string, since: Date): Promise<number>
   /**
    * Verifica si un usuario ya utilizó un cupón específico en alguna orden no cancelada.
    * Usado por ValidateCoupon para la restricción ONCE_PER_CUSTOMER.

@@ -160,8 +160,28 @@ export interface BuyerInfo {
 export interface Order {
   /** ID único del pedido (cuid) */
   id: string
-  /** ID del usuario que realizó el pedido */
-  userId: string
+  /**
+   * ID del usuario registrado dueño del pedido. `null` en compras de invitado
+   * (guest checkout), donde `guestId` es no-null. La BD garantiza la
+   * exclusividad con el CHECK `order_owner_exclusive`.
+   */
+  userId: string | null
+  /** ID del GuestCustomer dueño del pedido. `null` en pedidos de usuarios registrados. */
+  guestId: string | null
+  /**
+   * Email de contacto del pedido — siempre presente, para registrados y para
+   * invitados. Es la única fuente de verdad para la confirmación por correo y
+   * para Vendelo: no hacer join a User para obtener el email.
+   */
+  contactEmail: string
+  /**
+   * Token opaco de 256 bits que permite consultar el pedido sin sesión.
+   *
+   * ⚠️ Es una credencial: quien lo tiene puede ver el pedido. NUNCA incluirlo en
+   * respuestas de listado, en logs, ni en la proyección pública de seguimiento.
+   * Solo viaja en la respuesta de creación del pedido y en el email al comprador.
+   */
+  trackingToken: string
   /** Estado actual del ciclo de vida del pedido */
   status: OrderStatus
   /**

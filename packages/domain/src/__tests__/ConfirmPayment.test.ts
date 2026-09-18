@@ -9,6 +9,9 @@ function makePendingOrder(overrides?: Partial<Order>): Order {
   return {
     id: 'order-1',
     userId: 'user-1',
+    guestId: null,
+    contactEmail: 'cliente@motek.test',
+    trackingToken: 'tok-test-order-1',
     status: 'PENDING',
     total: 5000000,
     shippingAddress: {

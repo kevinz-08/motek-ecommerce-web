@@ -52,7 +52,7 @@ function makeRepos(coupon: Coupon | null, opts?: {
 
 const INPUT_BASE = {
   code: 'HALLOWEEN20',
-  userId: 'user-1',
+  identity: { kind: 'user' as const, userId: 'user-1' },
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -211,5 +211,61 @@ describe('ValidateCoupon', () => {
       ...INPUT_BASE, items: [makeItem()],
     })
     expect(result.ok).toBe(true)
+  })
+
+  // ── Identidad de invitado ───────────────────────────────────────────────────
+
+  describe('comprador invitado', () => {
+    const GUEST_INPUT = { code: 'HALLOWEEN20', identity: { kind: 'guest' as const } }
+
+    it('acepta un cupón sin restricción', async () => {
+      const { couponRepo, orderRepo } = makeRepos(makeCoupon({ restriction: 'NONE' }))
+      const result = await new ValidateCoupon(couponRepo, orderRepo).execute({
+        ...GUEST_INPUT, items: [makeItem()],
+      })
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.value.discount).toBe(2000000) // 20% de 100.000 COP
+    })
+
+    it('rechaza ONCE_PER_CUSTOMER pidiendo cuenta, sin consultar el historial', async () => {
+      const { couponRepo, orderRepo } = makeRepos(makeCoupon({ restriction: 'ONCE_PER_CUSTOMER' }))
+      const result = await new ValidateCoupon(couponRepo, orderRepo).execute({
+        ...GUEST_INPUT, items: [makeItem()],
+      })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error.code).toBe('UNAUTHORIZED')
+        expect(result.error.details).toMatchObject({ reason: 'RESTRICTED_COUPON' })
+        // El mensaje no revela nada del historial de ese correo: decir "ya usaste
+        // este cupón" dejaría espiar las compras de un email ajeno.
+        expect(result.error.message).not.toMatch(/ya utilizaste/i)
+      }
+      expect(orderRepo.existsByCouponAndUser).not.toHaveBeenCalled()
+    })
+
+    it('rechaza FIRST_PURCHASE pidiendo cuenta, sin consultar el historial', async () => {
+      const { couponRepo, orderRepo } = makeRepos(makeCoupon({ restriction: 'FIRST_PURCHASE' }))
+      const result = await new ValidateCoupon(couponRepo, orderRepo).execute({
+        ...GUEST_INPUT, items: [makeItem()],
+      })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('UNAUTHORIZED')
+      expect(orderRepo.hasApprovedOrders).not.toHaveBeenCalled()
+    })
+
+    it('valida el cupón vencido antes que la restricción — el motivo real gana', async () => {
+      const { couponRepo, orderRepo } = makeRepos(makeCoupon({
+        restriction: 'FIRST_PURCHASE',
+        expiresAt: new Date(Date.now() - 1000),
+      }))
+      const result = await new ValidateCoupon(couponRepo, orderRepo).execute({
+        ...GUEST_INPUT, items: [makeItem()],
+      })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION_ERROR')
+    })
   })
 })
