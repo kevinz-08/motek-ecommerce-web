@@ -26,6 +26,7 @@
 import type { Metadata } from 'next'
 import { Oswald, Roboto } from 'next/font/google'
 import { Toaster } from 'sonner'
+import { Analytics } from '@vercel/analytics/next'
 import { AuthSessionProvider } from '@/components/providers/SessionProvider'
 import './globals.css'
 
@@ -65,6 +66,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-full flex flex-col bg-white text-gray-900" suppressHydrationWarning>
         <AuthSessionProvider>{children}</AuthSessionProvider>
         <Toaster theme="dark" position="bottom-right" richColors closeButton />
+        <Analytics />
       </body>
     </html>
   )
