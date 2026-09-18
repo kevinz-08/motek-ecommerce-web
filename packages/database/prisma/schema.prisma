@@ -250,7 +250,24 @@ model MotorcycleCompatibility {
 
 model Order {
   id                 String          @id @default(cuid())
-  userId             String
+  /// Dueño registrado del pedido. Null cuando la compra se hizo como invitado
+  /// (en ese caso `guestId` es no-null). Invariante garantizada por el CHECK
+  /// `order_owner_exclusive`: exactamente uno de userId/guestId es no-null.
+  userId             String?
+  /// Comprador invitado (sin cuenta). Null en pedidos de usuarios registrados.
+  /// Un pedido invitado puede "reclamarse" más tarde: userId pasa a no-null y
+  /// guestId a null (ver ClaimGuestOrders).
+  guestId            String?
+  /// Email de contacto del pedido — SIEMPRE presente, tanto para registrados
+  /// como para invitados. Denormalizado a propósito:
+  ///   - Elimina el join a User en webhooks, EmailQueue y Vendelo.
+  ///   - Preserva el email histórico si el usuario cambia el de su cuenta.
+  contactEmail       String
+  /// Token opaco de 256 bits (base64url) para consultar el pedido sin sesión.
+  /// Se genera para TODO pedido; para invitados es el único medio de acceso.
+  /// NUNCA se expone en listados ni en respuestas públicas — solo en la respuesta
+  /// de creación del pedido y en el email de confirmación.
+  trackingToken      String          @unique
   status             OrderStatus     @default(PENDING)
   /// centavos COP — total cobrado/adeudado: subtotal de productos + shippingTotal
   /// cuando el flete se cobró en línea (ver shippingTotal). Para COD o cuando el
@@ -285,7 +302,8 @@ model Order {
   /// centavos COP — monto descontado por el cupón. 0 si no se aplicó cupón.
   discountAmount     Int             @default(0)
   createdAt          DateTime        @default(now())
-  user               User            @relation(fields: [userId], references: [id])
+  user               User?           @relation(fields: [userId], references: [id])
+  guest              GuestCustomer?  @relation(fields: [guestId], references: [id])
   coupon             Coupon?         @relation(fields: [couponCode], references: [code])
   items              OrderItem[]
   payment            Payment?
@@ -295,6 +313,31 @@ model Order {
   /// (getTodayRevenue, getMonthRevenue, getRevenueSeries), que siempre filtran por
   /// status y ordenan/agrupan por createdAt.
   @@index([status, createdAt])
+  /// Cubre la búsqueda de pedidos reclamables por email (ClaimGuestOrders) y el
+  /// límite anti-abuso de pedidos PENDING por email de contacto.
+  @@index([contactEmail, createdAt])
+}
+
+/// Comprador que compró sin registrarse (guest checkout).
+///
+/// NO es un User: no puede iniciar sesión, no participa de NextAuth, y su email
+/// NO es único — la misma persona puede comprar como invitado varias veces sin
+/// que sus filas se unifiquen. Deliberado: un email escrito en un formulario no
+/// prueba identidad, así que unificar por email permitiría a un tercero acumular
+/// historial (y por tanto reputación de envío) sobre un email ajeno.
+model GuestCustomer {
+  id                 String    @id @default(cuid())
+  email              String
+  name               String?
+  phone              String?
+  /// Consentimiento de marketing, separado del de T&C (Ley 1581/2012) —
+  /// mismo criterio que User.marketingConsent.
+  marketingConsent   Boolean   @default(false)
+  marketingConsentAt DateTime?
+  createdAt          DateTime  @default(now())
+  orders             Order[]
+
+  @@index([email])
 }
 
 /// Envío asociado a un pedido. Se crea cuando Vendelo dispara el primer webhook

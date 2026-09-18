@@ -10,10 +10,10 @@ import {
 import { JwtService } from '@nestjs/jwt'
 import * as bcrypt from 'bcryptjs'
 import { createHash, randomBytes } from 'crypto'
-import { IUserRepository } from '@motek/domain'
+import { ClaimGuestOrders, IOrderRepository, IUserRepository } from '@motek/domain'
 import { PrismaService } from '../infrastructure/database/prisma.service'
 import { ResendEmailService } from '../infrastructure/services/ResendEmailService'
-import { USER_REPOSITORY } from '../infrastructure/injection-tokens'
+import { ORDER_REPOSITORY, USER_REPOSITORY } from '../infrastructure/injection-tokens'
 import { OtpService } from './otp.service'
 import { RegisterDto } from './dto/register.dto'
 import { LoginDto } from './dto/login.dto'
@@ -39,6 +39,7 @@ export class AuthService {
     private readonly emailService: ResendEmailService,
     private readonly otpService: OtpService,
     @Inject(USER_REPOSITORY) private readonly userRepo: IUserRepository,
+    @Inject(ORDER_REPOSITORY) private readonly orderRepo: IOrderRepository,
   ) {}
 
   async register(dto: RegisterDto): Promise<{ message: string; verificationRequired: boolean }> {
@@ -117,6 +118,25 @@ export class AuthService {
       where: { id: rawUser.id },
       data: { emailVerified: new Date() },
     })
+
+    // Verificar el OTP prueba la propiedad del correo — es el único momento del
+    // registro en que eso queda demostrado. Recién ahí es seguro vincular los
+    // pedidos que esa persona hizo antes como invitada con este mismo email.
+    // Hacerlo en el checkout, con un correo apenas tecleado, expondría los datos
+    // del comprador real a quien escribiera su dirección.
+    const claim = await new ClaimGuestOrders(this.orderRepo).execute({
+      userId: rawUser.id,
+      accountEmail: dto.email,
+    })
+    if (claim.ok && claim.value.claimed > 0) {
+      this.logger.log(
+        `[VerifyEmail] userId=${rawUser.id} vinculó ${claim.value.claimed} pedido(s) hechos como invitado`,
+      )
+    } else if (!claim.ok) {
+      // No romper la verificación por esto: la cuenta ya quedó verificada y el
+      // usuario siempre puede reclamar sus pedidos desde /pedidos.
+      this.logger.error(`[VerifyEmail] Falló el vínculo de pedidos de invitado: ${claim.error.code}`)
+    }
 
     return { message: 'Email verificado correctamente. Ya puedes iniciar sesión.' }
   }

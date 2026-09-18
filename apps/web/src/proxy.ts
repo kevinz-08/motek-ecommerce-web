@@ -18,9 +18,13 @@
  *                  Sin sesión → redirect /auth/login
  *                  Con sesión pero no ADMIN → redirect /
  *
- *   /checkout/*  → Requiere sesión activa (cualquier usuario autenticado)
- *                  Sin sesión → redirect /auth/login?callbackUrl=/checkout
- *                  El callbackUrl permite volver al checkout después de login.
+ *   /checkout/*  → YA NO se protege. Con guest checkout, un visitante sin sesión
+ *                  tiene que poder llegar al formulario. Quien decide si el flujo
+ *                  de invitado está abierto es el backend (Settings
+ *                  GUEST_CHECKOUT_ENABLED), y `CheckoutForm` muestra el CTA de
+ *                  login cuando no lo está. Las reglas que sí dependen de tener
+ *                  cuenta (COD, cupones restringidos) las impone el dominio, no
+ *                  este proxy.
  *
  * El matcher en `config.matcher` limita el proxy a solo las rutas necesarias,
  * evitando que corra en cada request (incluyendo assets estáticos, imágenes, etc.)
@@ -30,7 +34,6 @@ import { NextResponse } from 'next/server'
 export const proxy = auth((request) => {
   const { nextUrl, auth: session } = request
   const isAdminRoute = nextUrl.pathname.startsWith('/admin')
-  const isCheckoutRoute = nextUrl.pathname.startsWith('/checkout')
 
   if (isAdminRoute) {
     if (!session?.user) {
@@ -42,15 +45,9 @@ export const proxy = auth((request) => {
     }
   }
 
-  if (isCheckoutRoute && !session?.user) {
-    const loginUrl = new URL('/auth/login', nextUrl)
-    loginUrl.searchParams.set('callbackUrl', nextUrl.pathname)
-    return NextResponse.redirect(loginUrl)
-  }
-
   return NextResponse.next()
 })
 
 export const config = {
-  matcher: ['/admin/:path*', '/checkout/:path*'],
+  matcher: ['/admin/:path*'],
 }

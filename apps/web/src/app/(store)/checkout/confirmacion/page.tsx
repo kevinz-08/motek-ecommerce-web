@@ -1,6 +1,5 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
-import { redirect } from 'next/navigation'
 import { auth } from '@/lib/auth'
 import { getOrderConfirmation } from '@/lib/queries/getOrderConfirmation'
 import { OrderStatusBadge } from '@/components/store/OrderStatusBadge'
@@ -9,7 +8,7 @@ import { CartCleaner } from '@/components/checkout/CartCleaner'
 import { OrderStatusPoller } from '@/components/checkout/OrderStatusPoller'
 
 interface PageProps {
-  searchParams: Promise<{ orderId?: string }>
+  searchParams: Promise<{ orderId?: string; token?: string }>
 }
 
 export const metadata: Metadata = {
@@ -44,20 +43,26 @@ const PAYMENT_PROVIDER_LABEL: Record<string, string> = {
 
 // ─── Estado desconocido (sin orderId o pedido no encontrado) ──────────────────
 
-function NotFound() {
+/**
+ * Mismo mensaje para "no existe", "no es tuyo" y "token inválido". Distinguirlos
+ * dejaría averiguar qué IDs de pedido existen probando la URL.
+ */
+function NotFound({ isGuest }: { isGuest: boolean }) {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="text-center max-w-sm">
         <div className="text-5xl mb-4">🔍</div>
         <h1 className="text-2xl font-bold text-gray-900 mb-2">Pedido no encontrado</h1>
         <p className="text-gray-500 mb-6">
-          No pudimos encontrar los detalles de tu pedido. Revisa tu historial.
+          {isGuest
+            ? 'No pudimos encontrar los detalles de tu pedido. Revisa el enlace del correo de confirmación.'
+            : 'No pudimos encontrar los detalles de tu pedido. Revisa tu historial.'}
         </p>
         <Link
-          href="/pedidos"
+          href={isGuest ? '/pedidos/seguimiento/solicitar' : '/pedidos'}
           className="inline-block bg-[var(--c-accent)] text-[var(--c-text-on-accent)] px-6 py-3 rounded-xl font-bold hover:bg-[var(--c-accent-hover)] transition-colors"
         >
-          Ver mis pedidos
+          {isGuest ? 'Recuperar mi enlace' : 'Ver mis pedidos'}
         </Link>
       </div>
     </div>
@@ -68,14 +73,24 @@ function NotFound() {
 
 export default async function ConfirmacionPage({ searchParams }: PageProps) {
   const session = await auth()
-  if (!session?.user?.id) redirect('/auth/login?callbackUrl=/checkout/confirmacion')
+  const { orderId, token } = await searchParams
 
-  const { orderId } = await searchParams
+  // Dos vías de acceso: la sesión del dueño, o el token de seguimiento del
+  // invitado. Ya no se redirige a login sin sesión — quien vuelve de la pasarela
+  // tras comprar como invitado no tiene ninguna, y su token es la autorización.
+  const isGuestAccess = !session?.user?.id
+  if (!orderId) return <NotFound isGuest={isGuestAccess} />
 
-  if (!orderId) return <NotFound />
+  const access = session?.user?.id
+    ? { userId: session.user.id }
+    : token
+      ? { trackingToken: token }
+      : null
 
-  const order = await getOrderConfirmation(orderId, session.user.id)
-  if (!order) return <NotFound />
+  if (!access) return <NotFound isGuest />
+
+  const order = await getOrderConfirmation(orderId, access)
+  if (!order) return <NotFound isGuest={isGuestAccess} />
 
   const isPaid = order.status === 'PAID'
   const isPending = order.status === 'PENDING'
@@ -84,7 +99,7 @@ export default async function ConfirmacionPage({ searchParams }: PageProps) {
   return (
     <div className="min-h-screen bg-gray-50 py-10">
       {isPaid && <CartCleaner orderId={order.id} />}
-      {isPending && <OrderStatusPoller orderId={order.id} />}
+      {isPending && <OrderStatusPoller orderId={order.id} trackingToken={token} />}
       <div className="max-w-2xl mx-auto px-4 sm:px-6">
 
         {/* ── Hero de estado ─────────────────────────────────────────────── */}
@@ -203,7 +218,10 @@ export default async function ConfirmacionPage({ searchParams }: PageProps) {
         {/* ── Acciones ───────────────────────────────────────────────────── */}
         <div className="flex flex-col sm:flex-row gap-3 mt-6">
           <a
-            href={`/api/orders/${order.id}/comprobante`}
+            href={
+              `/api/orders/${order.id}/comprobante`
+              + (isGuestAccess && token ? `?token=${encodeURIComponent(token)}` : '')
+            }
             target="_blank"
             rel="noopener noreferrer"
             className="flex-1 inline-flex items-center justify-center gap-2 bg-[var(--c-accent)] text-white px-6 py-3 rounded-xl font-bold hover:bg-[var(--c-accent-hover)] transition-colors"
@@ -216,10 +234,14 @@ export default async function ConfirmacionPage({ searchParams }: PageProps) {
             Descargar comprobante
           </a>
           <Link
-            href="/pedidos"
+            href={
+              isGuestAccess && token
+                ? `/pedidos/seguimiento?token=${encodeURIComponent(token)}`
+                : '/pedidos'
+            }
             className="flex-1 text-center bg-gray-900 text-white px-6 py-3 rounded-xl font-bold hover:bg-gray-700 transition-colors"
           >
-            Ver mis pedidos
+            {isGuestAccess ? 'Seguir mi pedido' : 'Ver mis pedidos'}
           </Link>
           <Link
             href="/catalogo"

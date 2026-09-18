@@ -2,12 +2,18 @@ import { IOrderRepository, CreateOrderInput } from '@/domain/repositories/IOrder
 import { IProductRepository } from '@/domain/repositories/IProductRepository'
 import { IPaymentService, PaymentResult } from '@/domain/services/IPaymentService'
 import { Order, ShippingAddress, BuyerInfo, PaymentProvider, DeliveryMethod } from '@/domain/entities/Order'
+import { OrderCustomer, AccountRequiredReason } from '@/domain/entities/Customer'
 import { QuoteShipping } from '@/domain/use-cases/shipping/QuoteShipping'
 import { ValidateCoupon } from '@/domain/use-cases/coupons/ValidateCoupon'
 import { Result, ok, err, AppError } from '@/domain/shared/Result'
 
 export interface CreateOrderUseCaseInput {
-  userId: string
+  /**
+   * Identidad del comprador: usuario autenticado o invitado. De esto dependen
+   * dos reglas de negocio duras que se aplican más abajo — COD y cupones
+   * restringidos exigen cuenta.
+   */
+  customer: OrderCustomer
   // Intencionalmente sin `price`: el precio siempre se lee de la BD en el use case
   // para prevenir manipulación de precios desde el cliente.
   items: Array<{ productId: string; quantity: number }>
@@ -71,6 +77,11 @@ export interface CreateOrderOutput {
  * Razón: si se descontase aquí y el cliente abandona el pago, el stock quedaría
  * reducido incorrectamente.
  *
+ * Reglas que dependen de la identidad del comprador (`input.customer`):
+ *   - COD exige `kind: 'user'`. Ver el paso 0 de `execute()`.
+ *   - Los cupones con restricción distinta de NONE también — lo impone
+ *     ValidateCoupon, no este use case.
+ *
  * Flujo para COD (pago contra entrega):
  *   No hay pasarela ni webhook que confirme el pago — el pedido se confirma al
  *   crearse. Se inserta directamente con estado PAID y el stock se descuenta en
@@ -95,6 +106,24 @@ export class CreateOrder {
   ) {}
 
   async execute(input: CreateOrderUseCaseInput): Promise<Result<CreateOrderOutput>> {
+    // 0. COD exige cuenta. Un pedido contra entrega no pasa por ninguna
+    //    autorización de pago: `createPaidOrder` lo deja PAID, descuenta stock y
+    //    lo encola a Vendelo, con un mensajero saliendo a una dirección que nadie
+    //    verificó. Sin cuenta no hay identidad ni historial contra el cual medir
+    //    el riesgo, así que el fraude sale gratis y a costa del negocio.
+    //
+    //    La regla vive acá y no solo en el controller para que valga por igual
+    //    en cualquier caller futuro (otro endpoint, un job, un test de humo).
+    if (input.customer.kind === 'guest' && input.paymentProvider === 'COD') {
+      return err(
+        new AppError(
+          'UNAUTHORIZED',
+          'El pago contra entrega requiere que inicies sesión con tu cuenta',
+          { reason: 'COD_PAYMENT' satisfies AccountRequiredReason },
+        ),
+      )
+    }
+
     // 1. Validar stock y calcular el subtotal de productos
     const resolvedItems: Array<{
       productId: string
@@ -149,7 +178,9 @@ export class CreateOrder {
       }
       const couponResult = await this.validateCoupon.execute({
         code: input.couponCode,
-        userId: input.userId,
+        identity: input.customer.kind === 'user'
+          ? { kind: 'user', userId: input.customer.userId }
+          : { kind: 'guest' },
         items: resolvedItems.map(item => ({
           productId: item.productId,
           categoryId: item._categoryId,
@@ -202,7 +233,7 @@ export class CreateOrder {
     const total = Math.max(0, productSubtotal - discountAmount + shippingTotal)
 
     const createInput: CreateOrderInput = {
-      userId: input.userId,
+      customer: input.customer,
       items: resolvedItems.map(({ _categoryId: _c, _parentCategoryId: _p, ...item }) => item),
       shippingAddress: input.shippingAddress,
       buyer: input.buyer,

@@ -23,6 +23,7 @@ import { PrismaShipmentRepository } from './repositories/PrismaShipmentRepositor
 import { WompiService } from './services/WompiService'
 import { MercadoPagoService } from './services/MercadoPagoService'
 import { ResendEmailService } from './services/ResendEmailService'
+import { TurnstileService } from './services/TurnstileService'
 import { CloudinaryService } from './services/CloudinaryService'
 import { EmailQueueService } from './services/EmailQueueService'
 import { VendeloHttpClient } from './services/VendeloHttpClient'
@@ -50,6 +51,7 @@ import { ExpiredOrdersCleanupService } from './services/ExpiredOrdersCleanupServ
     WompiService,
     MercadoPagoService,
     ResendEmailService,
+    TurnstileService,
     CloudinaryService,
     EmailQueueService,
     VendeloHttpClient,
@@ -76,6 +78,7 @@ import { ExpiredOrdersCleanupService } from './services/ExpiredOrdersCleanupServ
     WompiService,
     MercadoPagoService,
     ResendEmailService,
+    TurnstileService,
     CloudinaryService,
     EmailQueueService,
     VendeloHttpClient,
