@@ -7,6 +7,8 @@ import { OrderStatusBadge } from '@/components/store/OrderStatusBadge'
 import { InvoiceDownloadButton } from '@/components/store/InvoiceDownloadButton'
 import { OrderItemThumbnail } from '@/components/store/OrderItemThumbnail'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { ClaimGuestOrdersBanner } from '@/components/store/ClaimGuestOrdersBanner'
+import { prisma } from '@/infrastructure/database/prisma-client'
 import { getPaginationPages } from '@/lib/pagination'
 
 export const metadata: Metadata = {
@@ -44,9 +46,23 @@ export default async function PedidosPage({ searchParams }: PageProps) {
 
   const { orders, total, totalPages } = await getOrderHistory(session.user.id, page)
 
+  // Pedidos hechos como invitado con este mismo correo y todavía sin vincular.
+  // La comparación es case-insensitive: en el checkout el correo se escribe a
+  // mano y pudo llevar mayúsculas.
+  const unclaimedCount = session.user.email
+    ? await prisma.order.count({
+      where: {
+        contactEmail: { equals: session.user.email, mode: 'insensitive' },
+        userId: null,
+      },
+    })
+    : 0
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+
+        <ClaimGuestOrdersBanner count={unclaimedCount} />
 
         {/* Header */}
         <div className="mb-8">

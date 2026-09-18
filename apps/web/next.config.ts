@@ -33,7 +33,24 @@ const nextConfig: NextConfig = {
     ],
   },
   async headers() {
-    return [{ source: '/(.*)', headers: securityHeaders }]
+    return [
+      {
+        // Rutas cuyo query string lleva el `trackingToken` del pedido (una
+        // credencial de 256 bits). Con la política global
+        // `strict-origin-when-cross-origin`, el header Referer de cada recurso
+        // externo que cargue la página —Cloudinary, Sentry— viajaría con la URL
+        // completa y el token dentro. `no-referrer` corta eso de raíz.
+        source: '/pedidos/seguimiento/:path*',
+        headers: [...securityHeaders.filter((h) => h.key !== 'Referrer-Policy'),
+          { key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+      {
+        source: '/checkout/confirmacion',
+        headers: [...securityHeaders.filter((h) => h.key !== 'Referrer-Policy'),
+          { key: 'Referrer-Policy', value: 'no-referrer' }],
+      },
+      { source: '/(.*)', headers: securityHeaders },
+    ]
   },
   async redirects() {
     return [

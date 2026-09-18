@@ -84,16 +84,21 @@ test.describe('Checkout — flujo completo (autenticado)', () => {
     })
   })
 
-  test('checkout — redirige a login si no hay sesión (sanity check)', async ({
+  test('checkout — accesible sin sesión desde que existe el guest checkout', async ({
     browser,
   }) => {
+    // Antes este test esperaba un redirect a /auth/login: `proxy.ts` protegía
+    // /checkout. Con la compra sin registro, un visitante debe poder llegar al
+    // formulario; quién puede completarlo lo decide el backend
+    // (GUEST_CHECKOUT_ENABLED) y lo cubre `guest-checkout.spec.ts`.
+    //
     // Contexto explícitamente sin cookies — el proyecto chromium-auth define
     // storageState por defecto, así que hay que sobrescribirlo a vacío o esta
     // "sesión limpia" hereda la autenticación del setup.
     const ctx = await browser.newContext({ storageState: { cookies: [], origins: [] } })
     const page = await ctx.newPage()
     await page.goto('http://localhost:3000/checkout')
-    await expect(page).toHaveURL(/\/auth\/login/)
+    await expect(page).not.toHaveURL(/\/auth\/login/)
     await ctx.close()
   })
 

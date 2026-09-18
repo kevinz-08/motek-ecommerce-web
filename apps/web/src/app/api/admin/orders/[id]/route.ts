@@ -31,7 +31,10 @@ export async function GET(
       },
       payment: true,
       shipment: { select: { status: true, trackingNumber: true, carrier: true, updatedAt: true } },
+      // Null en pedidos de invitado: el email de contacto sale de contactEmail,
+      // y el nombre, del GuestCustomer.
       user: { select: { email: true, name: true } },
+      guest: { select: { name: true } },
     },
   })
 
@@ -55,8 +58,12 @@ export async function GET(
     },
     shippingAddress: order.shippingAddress,
     user: {
-      email: order.user.email,
-      name: order.user.name,
+      // contactEmail vale para ambos casos y preserva el email histórico aunque
+      // el usuario cambie después el de su cuenta.
+      email: order.contactEmail,
+      name: order.user?.name ?? order.guest?.name ?? null,
+      /** true = compra sin cuenta. El panel lo muestra como badge "Invitado". */
+      isGuest: order.userId === null,
     },
     items: order.items.map((it) => ({
       sku: it.product.sku,
