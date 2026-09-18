@@ -58,6 +58,17 @@ function assertEnvVars(): void {
     console.error(`[Bootstrap] Variables de entorno requeridas no configuradas: ${missing.join(', ')}`)
     process.exit(1)
   }
+
+  // TURNSTILE_SECRET_KEY no aborta el arranque a propósito: sin ella la tienda
+  // funciona completa para clientes con cuenta, y solo el checkout de invitado
+  // queda cerrado (responde 503). Tumbar toda la API por un captcha faltante
+  // sería peor que el problema que evita.
+  if (!process.env['TURNSTILE_SECRET_KEY']) {
+    console.warn(
+      '[Bootstrap] TURNSTILE_SECRET_KEY no configurada — el checkout de invitado '
+      + 'quedará deshabilitado (503). Los pedidos con cuenta no se ven afectados.',
+    )
+  }
 }
 
 async function bootstrap() {

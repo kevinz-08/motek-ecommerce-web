@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto'
 import { Injectable } from '@nestjs/common'
 import type { Prisma } from '@motek/database'
 import {
@@ -18,8 +19,24 @@ import {
 } from '@motek/domain'
 import { PrismaService } from '../database/prisma.service'
 
+/**
+ * Genera el `trackingToken` de un pedido: 32 bytes aleatorios criptográficos en
+ * base64url (43 caracteres, 256 bits). Es la credencial que permite a un
+ * invitado ver su pedido sin sesión, así que la fuerza importa tanto como la de
+ * un ID de sesión — nunca usar cuid/uuid secuencial acá.
+ *
+ * No hay reintento por colisión de la constraint UNIQUE: con 256 bits la
+ * probabilidad es despreciable, y un choque preferimos verlo como error ruidoso
+ * (P2002) antes que enmascararlo con un loop.
+ */
+function generateTrackingToken(): string {
+  return randomBytes(32).toString('base64url')
+}
+
 type PrismaOrderRow = {
-  id: string; userId: string; status: string; total: number
+  id: string; userId: string | null; guestId: string | null
+  contactEmail: string; trackingToken: string
+  status: string; total: number
   shippingAddress: unknown; paymentProvider: string; shippingTotal: number; createdAt: Date
   deliveryMethod: string
   buyerIdType: string; buyerIdNumber: string; buyerBusinessName: string | null
@@ -53,6 +70,9 @@ function toDomain(o: PrismaOrderRow): Order {
   return {
     id: o.id,
     userId: o.userId,
+    guestId: o.guestId,
+    contactEmail: o.contactEmail,
+    trackingToken: o.trackingToken,
     status: o.status as OrderStatus,
     total: o.total,
     shippingTotal: o.shippingTotal,
@@ -67,6 +87,66 @@ function toDomain(o: PrismaOrderRow): Order {
     createdAt: o.createdAt,
     items: o.items?.map(toDomainItem),
     payment: o.payment ? toDomainPayment(o.payment) : undefined,
+  }
+}
+
+/**
+ * Traduce la identidad del comprador a los campos de escritura de Prisma.
+ *
+ * Para un invitado usa un nested create de GuestCustomer: Prisma lo ejecuta en
+ * la misma transacción que el pedido, así que un fallo al crear la orden no deja
+ * invitados huérfanos. Para un usuario registrado solo referencia el userId.
+ *
+ * `contactEmail` se normaliza a minúsculas y sin espacios porque es la clave de
+ * búsqueda de `findUnclaimedByEmail` / `claimOrders`: el comprador puede escribir
+ * "Juan@Gmail.com" en el checkout y loguearse después con "juan@gmail.com".
+ */
+type OrderOwnerData = Pick<Prisma.OrderCreateInput, 'contactEmail' | 'user' | 'guest'>
+
+function ownerData(customer: CreateOrderInput['customer']): OrderOwnerData {
+  const contactEmail = customer.email.trim().toLowerCase()
+
+  // `user: { connect }` y no `userId` crudo: Prisma no deja mezclar la forma
+  // "unchecked" (FKs escritas a mano) con la "checked" (relaciones anidadas), y
+  // la rama de invitado necesita sí o sí el nested create de GuestCustomer.
+  if (customer.kind === 'user') {
+    return { contactEmail, user: { connect: { id: customer.userId } } }
+  }
+
+  return {
+    contactEmail,
+    guest: {
+      create: {
+        email: contactEmail,
+        name: customer.name,
+        phone: customer.phone ?? null,
+        marketingConsent: customer.marketingConsent ?? false,
+        marketingConsentAt: customer.marketingConsent ? new Date() : null,
+      },
+    },
+  }
+}
+
+/**
+ * Arma el `data` de un `order.create`, compartido por `create()` (PENDING) y
+ * `createPaidOrder()` (COD, ya PAID). Todo en forma "checked" — relaciones por
+ * connect/create — porque la rama de invitado obliga a esa variante.
+ */
+function orderCreateData(input: CreateOrderInput): Prisma.OrderCreateInput {
+  return {
+    ...ownerData(input.customer),
+    trackingToken: generateTrackingToken(),
+    total: input.total,
+    shippingAddress: input.shippingAddress as unknown as Prisma.InputJsonValue,
+    deliveryMethod: input.deliveryMethod,
+    buyerIdType: input.buyer.idType,
+    buyerIdNumber: input.buyer.idNumber,
+    buyerBusinessName: input.buyer.businessName ?? null,
+    paymentProvider: input.paymentProvider,
+    shippingTotal: input.shippingTotal,
+    coupon: input.couponCode ? { connect: { code: input.couponCode } } : undefined,
+    discountAmount: input.discountAmount ?? 0,
+    items: { create: input.items },
   }
 }
 
@@ -116,18 +196,7 @@ export class PrismaOrderRepository implements IOrderRepository {
   async create(input: CreateOrderInput): Promise<Order> {
     const o = await this.prisma.client.order.create({
       data: {
-        userId: input.userId,
-        total: input.total,
-        shippingAddress: input.shippingAddress as unknown as Prisma.InputJsonValue,
-        deliveryMethod: input.deliveryMethod,
-        buyerIdType: input.buyer.idType,
-        buyerIdNumber: input.buyer.idNumber,
-        buyerBusinessName: input.buyer.businessName ?? null,
-        paymentProvider: input.paymentProvider,
-        shippingTotal: input.shippingTotal,
-        couponCode: input.couponCode ?? null,
-        discountAmount: input.discountAmount ?? 0,
-        items: { create: input.items },
+        ...orderCreateData(input),
         payment: {
           create: { provider: input.paymentProvider, amount: input.total },
         },
@@ -141,19 +210,8 @@ export class PrismaOrderRepository implements IOrderRepository {
     const o = await this.prisma.client.$transaction(async (tx) => {
       const created = await tx.order.create({
         data: {
-          userId: input.userId,
+          ...orderCreateData(input),
           status: 'PAID',
-          total: input.total,
-          shippingAddress: input.shippingAddress as unknown as Prisma.InputJsonValue,
-          deliveryMethod: input.deliveryMethod,
-          buyerIdType: input.buyer.idType,
-          buyerIdNumber: input.buyer.idNumber,
-          buyerBusinessName: input.buyer.businessName ?? null,
-          paymentProvider: input.paymentProvider,
-          shippingTotal: input.shippingTotal,
-          couponCode: input.couponCode ?? null,
-          discountAmount: input.discountAmount ?? 0,
-          items: { create: input.items },
           payment: {
             create: { provider: input.paymentProvider, amount: input.total, status: 'APPROVED' },
           },
@@ -253,6 +311,64 @@ export class PrismaOrderRepository implements IOrderRepository {
       select: { id: true, vendeloOrderId: true },
     })
     return rows.map((r) => ({ id: r.id, vendeloOrderId: r.vendeloOrderId }))
+  }
+
+  async findByTrackingToken(token: string): Promise<Order | null> {
+    const o = await this.prisma.client.order.findUnique({
+      where: { trackingToken: token },
+      // Incluye el producto de cada ítem: la página de seguimiento del invitado
+      // muestra nombres reales, y sin sesión no hay otra query que los resuelva.
+      include: { items: { include: { product: true } }, payment: true },
+    })
+    if (!o) return null
+
+    const domain = toDomain(o)
+    domain.items = o.items.map((i) => ({
+      ...toDomainItem(i),
+      productSnapshot: {
+        sku: i.product.sku,
+        name: i.product.name,
+        weightKg: i.product.weightKg,
+        heightCm: i.product.heightCm,
+        widthCm: i.product.widthCm,
+        lengthCm: i.product.lengthCm,
+      },
+    }))
+    return domain
+  }
+
+  async findUnclaimedByEmail(email: string): Promise<Order[]> {
+    const orders = await this.prisma.client.order.findMany({
+      // `insensitive` y no un simple toLowerCase() porque los pedidos históricos
+      // recibieron su contactEmail del backfill desde User.email, que puede traer
+      // mayúsculas. Los pedidos nuevos ya se guardan normalizados.
+      where: { contactEmail: { equals: email.trim(), mode: 'insensitive' }, userId: null },
+      include: { items: true, payment: true },
+      orderBy: { createdAt: 'desc' },
+    })
+    return orders.map(toDomain)
+  }
+
+  async claimOrders(email: string, userId: string): Promise<number> {
+    const result = await this.prisma.client.order.updateMany({
+      // El filtro `userId: null` es lo que hace la operación idempotente y de un
+      // solo sentido: un pedido ya vinculado (a esta cuenta o a otra) nunca entra.
+      where: { contactEmail: { equals: email.trim(), mode: 'insensitive' }, userId: null },
+      // guestId pasa a null en el mismo UPDATE para no violar el CHECK
+      // `order_owner_exclusive` (exactamente uno de los dos es no-null).
+      data: { userId, guestId: null },
+    })
+    return result.count
+  }
+
+  async countPendingByEmailSince(email: string, since: Date): Promise<number> {
+    return this.prisma.client.order.count({
+      where: {
+        contactEmail: { equals: email.trim(), mode: 'insensitive' },
+        status: 'PENDING',
+        createdAt: { gte: since },
+      },
+    })
   }
 
   async existsByCouponAndUser(couponCode: string, userId: string): Promise<boolean> {

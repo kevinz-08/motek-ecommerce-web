@@ -70,7 +70,17 @@ function buildMocks() {
     findByEmail: vi.fn(),
   }
 
-  return { prismaMock, jwtMock, emailMock, otpMock, userRepoMock, verifiedUser, unverifiedUser }
+  // Tras verificar el OTP, AuthService vincula los pedidos que la persona hizo
+  // como invitada con ese mismo correo — es el primer momento en que la
+  // propiedad del email queda probada.
+  const orderRepoMock = {
+    claimOrders: vi.fn().mockResolvedValue(0),
+  }
+
+  return {
+    prismaMock, jwtMock, emailMock, otpMock, userRepoMock, orderRepoMock,
+    verifiedUser, unverifiedUser,
+  }
 }
 
 function buildService(mocks: ReturnType<typeof buildMocks>): AuthService {
@@ -80,6 +90,7 @@ function buildService(mocks: ReturnType<typeof buildMocks>): AuthService {
     mocks.emailMock as never,
     mocks.otpMock as never,
     mocks.userRepoMock as never,
+    mocks.orderRepoMock as never,
   )
 }
 
@@ -222,6 +233,46 @@ describe('AuthService.verifyEmail', () => {
     expect(mocks.prismaMock.client.user.update).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ emailVerified: expect.any(Date) }) }),
     )
+    expect(result.message).toContain('verificado correctamente')
+  })
+
+  it('vincula los pedidos de invitado solo DESPUÉS de verificar el OTP', async () => {
+    // Verificar el código es lo único que prueba que la persona es dueña del
+    // correo. Recién ahí es seguro asociarle los pedidos que hizo como invitada.
+    const mocks = buildMocks()
+    mocks.prismaMock.client.user.findUnique.mockResolvedValue({ id: 'user-001', emailVerified: null })
+    mocks.otpMock.verify.mockResolvedValue('success')
+    mocks.orderRepoMock.claimOrders.mockResolvedValue(2)
+    const service = buildService(mocks)
+
+    await service.verifyEmail({ email: 'Test@Example.com', code: '482931' })
+
+    // El email se normaliza: en el checkout se escribe a mano y pudo llevar mayúsculas.
+    expect(mocks.orderRepoMock.claimOrders).toHaveBeenCalledWith('test@example.com', 'user-001')
+  })
+
+  it('no vincula pedidos si el código es inválido', async () => {
+    const mocks = buildMocks()
+    mocks.prismaMock.client.user.findUnique.mockResolvedValue({ id: 'user-001', emailVerified: null })
+    mocks.otpMock.verify.mockResolvedValue('invalid_or_expired')
+    const service = buildService(mocks)
+
+    await service.verifyEmail({ email: 'test@example.com', code: '000000' }).catch(() => undefined)
+
+    expect(mocks.orderRepoMock.claimOrders).not.toHaveBeenCalled()
+  })
+
+  it('un fallo al vincular no rompe la verificación', async () => {
+    // La cuenta ya quedó verificada; el usuario siempre puede reclamar sus
+    // pedidos después desde /pedidos.
+    const mocks = buildMocks()
+    mocks.prismaMock.client.user.findUnique.mockResolvedValue({ id: 'user-001', emailVerified: null })
+    mocks.otpMock.verify.mockResolvedValue('success')
+    mocks.orderRepoMock.claimOrders.mockRejectedValue(new Error('db down'))
+    const service = buildService(mocks)
+
+    const result = await service.verifyEmail({ email: 'test@example.com', code: '482931' })
+
     expect(result.message).toContain('verificado correctamente')
   })
 })

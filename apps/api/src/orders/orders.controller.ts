@@ -3,9 +3,11 @@ import {
   Inject, Logger, Param, Patch, Post,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
+import { Throttle } from '@nestjs/throttler'
 import {
   IOrderRepository, IProductRepository, IPaymentService, IVendeloShippingPort,
   ICouponRepository, CreateOrder, QuoteShipping, ValidateCoupon, OrderStatus,
+  ClaimGuestOrders,
 } from '@motek/domain'
 import {
   ORDER_REPOSITORY, PRODUCT_REPOSITORY, PAYMENT_SERVICE, VENDELO_SHIPPING_PORT,
@@ -93,7 +95,7 @@ export class OrdersController {
       new ValidateCoupon(this.couponRepo, this.orderRepo),
     )
     const result = await useCase.execute({
-      userId: user.id,
+      customer: { kind: 'user', userId: user.id, email: user.email },
       items: dto.items,
       shippingAddress: dto.shippingAddress,
       buyer: dto.buyer,
@@ -125,7 +127,7 @@ export class OrdersController {
       // COD no tiene webhook de pasarela que confirme el pago — el pedido ya nació
       // PAID (CreateOrder lo confirmó al crearlo), así que disparamos aquí mismo
       // los efectos secundarios que para pagos online dispara ConfirmPayment.
-      await this.emailQueue.enqueue(user.email, result.value.order.id)
+      await this.emailQueue.enqueue(result.value.order.contactEmail, result.value.order.id)
       // Retiro en tienda: el cliente lo recoge en persona, nunca se despacha
       // por Vendelo — no encolar o un mensajero saldría a entregar en falso.
       if (result.value.order.deliveryMethod !== 'STORE_PICKUP') {
@@ -134,10 +136,35 @@ export class OrdersController {
     } else {
       // Fire-and-forget: nunca bloquea ni falla la respuesta del pedido
       this.emailService
-        .sendOrderReceived(result.value.order, user.email)
+        .sendOrderReceived(result.value.order, result.value.order.contactEmail)
         .catch((e) => this.logger.error(`Email sendOrderReceived failed orderId=${result.value.order.id}: ${e}`))
     }
 
+    return result.value
+  }
+
+  /**
+   * Vincula a la cuenta autenticada los pedidos que se hicieron como invitado
+   * con ese mismo email.
+   *
+   * No recibe email en el body a propósito: el único email en el que se puede
+   * confiar es el del JWT. Si el cliente pudiera elegirlo, cualquiera reclamaría
+   * los pedidos de cualquier otro con solo escribir su correo.
+   */
+  @Post('claim')
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Vincular a mi cuenta los pedidos hechos como invitado' })
+  async claim(@CurrentUser() user: JwtUser) {
+    const result = await new ClaimGuestOrders(this.orderRepo).execute({
+      userId: user.id,
+      accountEmail: user.email,
+    })
+    if (!result.ok) throw result.error
+
+    if (result.value.claimed > 0) {
+      this.logger.log(`[Claim] userId=${user.id} reclamó ${result.value.claimed} pedido(s) de invitado`)
+    }
     return result.value
   }
 

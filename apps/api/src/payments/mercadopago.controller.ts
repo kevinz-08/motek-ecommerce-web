@@ -93,13 +93,9 @@ export class MercadoPagoController {
     if (paymentStatus === 'APPROVED' && result.value.stateChanged) {
       const order = await this.orderRepo.findById(orderId)
       if (order) {
-        const user = await this.prisma.client.user.findUnique({
-          where: { id: order.userId },
-          select: { email: true },
-        })
-        if (user?.email) {
-          await this.emailQueue.enqueue(user.email, orderId)
-        }
+        // contactEmail está siempre presente (pedidos de usuario y de invitado),
+        // así que no hace falta join a User — que además no existe para invitados.
+        await this.emailQueue.enqueue(order.contactEmail, orderId)
         // Retiro en tienda: el cliente lo recoge en persona, nunca se despacha
         // por Vendelo — no encolar o un mensajero saldría a entregar en falso.
         if (order.deliveryMethod !== 'STORE_PICKUP') {

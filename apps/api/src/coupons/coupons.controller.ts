@@ -8,6 +8,8 @@ import {
   ValidateCoupon,
 } from '@motek/domain'
 import { COUPON_REPOSITORY, ORDER_REPOSITORY } from '../infrastructure/injection-tokens'
+import { Throttle } from '@nestjs/throttler'
+import { Public } from '../auth/decorators/public.decorator'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { CurrentUser, JwtUser } from '../auth/decorators/current-user.decorator'
 import { CreateCouponDto } from './dto/create-coupon.dto'
@@ -35,7 +37,35 @@ export class CouponsController {
     const useCase = new ValidateCoupon(this.couponRepo, this.orderRepo)
     const result = await useCase.execute({
       code: dto.code,
-      userId: user.id,
+      identity: { kind: 'user', userId: user.id },
+      items: dto.items,
+    })
+    if (!result.ok) throw result.error
+    return result.value
+  }
+
+  /**
+   * Misma validación que `POST /coupons/validate`, pero sin sesión — la usa el
+   * checkout de invitado para poder mostrar el descuento antes de pagar.
+   *
+   * No es una versión "relajada": `ValidateCoupon` rechaza con UNAUTHORIZED
+   * cualquier cupón cuya restricción dependa del historial del cliente
+   * (ONCE_PER_CUSTOMER, FIRST_PURCHASE), porque un email sin verificar no es
+   * identidad. El invitado ve el mismo resultado que verá al crear el pedido.
+   *
+   * Es público y barato de llamar, así que va con un throttle propio para que no
+   * sirva de oráculo para enumerar códigos de cupón por fuerza bruta.
+   */
+  @Post('validate-guest')
+  @Public()
+  @HttpCode(200)
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
+  @ApiOperation({ summary: 'Validar cupón sin sesión (checkout de invitado)' })
+  async validateAsGuest(@Body() dto: ValidateCouponDto) {
+    const useCase = new ValidateCoupon(this.couponRepo, this.orderRepo)
+    const result = await useCase.execute({
+      code: dto.code,
+      identity: { kind: 'guest' },
       items: dto.items,
     })
     if (!result.ok) throw result.error

@@ -43,6 +43,7 @@ const mockOrderRepo = {
   findById: vi.fn().mockResolvedValue({
     id: 'order-1',
     userId: 'user-1',
+    contactEmail: 'user@test.com',
     total: 5000000,
     status: 'PENDING',
     items: [],
@@ -151,6 +152,7 @@ describe('WompiController', () => {
       mockOrderRepo.findById.mockResolvedValueOnce({
         id: 'order-1',
         userId: 'user-1',
+        contactEmail: 'user@test.com',
         total: 5000000,
         status: 'PENDING',
         items: [],

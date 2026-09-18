@@ -57,6 +57,7 @@ import type { JwtUser } from '../auth/decorators/current-user.decorator'
 const mockOrder = {
   id: 'order-abc123',
   userId: 'user-1',
+  contactEmail: 'user@test.com',
   total: 5000000,
   status: 'PENDING',
   items: [],

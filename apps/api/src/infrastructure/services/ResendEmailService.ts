@@ -19,6 +19,23 @@ export class ResendEmailService {
     }
   }
 
+  /**
+   * URL a la que apunta el botón principal de los correos de un pedido.
+   *
+   * Un invitado no tiene panel: su único acceso es el `trackingToken`, así que
+   * este correo es literalmente la llave de su pedido. Un usuario registrado va
+   * a su historial.
+   */
+  private orderCtaHref(order: Order): string {
+    return order.userId
+      ? `${this.frontendUrl}/pedidos`
+      : `${this.frontendUrl}/pedidos/seguimiento?token=${encodeURIComponent(order.trackingToken)}`
+  }
+
+  private orderCtaLabel(order: Order): string {
+    return order.userId ? 'Ver mis pedidos' : 'Seguir mi pedido'
+  }
+
   /** Email inmediato al crear el pedido (estado PENDING). */
   async sendOrderReceived(order: Order, customerEmail: string): Promise<void> {
     if (!this.resend) return
@@ -34,7 +51,7 @@ export class ResendEmailService {
         orderId: order.id,
         total: order.total,
         address: order.shippingAddress,
-        cta: { label: 'Ver mi pedido', href: `${this.frontendUrl}/checkout/confirmacion?orderId=${order.id}` },
+        cta: { label: this.orderCtaLabel(order), href: this.orderCtaHref(order) },
       }),
     })
     if (error) this.logger.error(`sendOrderReceived failed orderId=${order.id}: ${JSON.stringify(error)}`)
@@ -60,7 +77,7 @@ export class ResendEmailService {
         orderId: order.id,
         total: order.total,
         address: order.shippingAddress,
-        cta: { label: 'Ver mis pedidos', href: `${this.frontendUrl}/mis-pedidos` },
+        cta: { label: this.orderCtaLabel(order), href: this.orderCtaHref(order) },
         footer: 'Te notificaremos cuando tu pedido sea despachado.',
       }),
     })
@@ -84,7 +101,7 @@ export class ResendEmailService {
         orderId: order.id,
         total: order.total,
         address: order.shippingAddress,
-        cta: { label: 'Ver mis pedidos', href: `${this.frontendUrl}/mis-pedidos` },
+        cta: { label: this.orderCtaLabel(order), href: this.orderCtaHref(order) },
       }),
     })
     if (error) this.logger.error(`sendShippingNotification failed orderId=${order.id}: ${JSON.stringify(error)}`)
@@ -138,6 +155,100 @@ export class ResendEmailService {
       }),
     })
     if (error) this.logger.error(`sendPaymentDeclined failed orderId=${order.id}: ${JSON.stringify(error)}`)
+  }
+
+  /**
+   * Reenvía al comprador los enlaces de seguimiento de sus pedidos de invitado.
+   *
+   * Es la respuesta a "perdí el correo de confirmación". El endpoint que lo
+   * dispara responde siempre 202 sin decir si el email existe: la única señal
+   * de que hay o no pedidos llega a la bandeja del dueño del correo, nunca a
+   * quien hizo la petición.
+   */
+  async sendGuestTrackingLinks(
+    customerEmail: string,
+    orders: Array<{ id: string; trackingToken: string; createdAt: Date; total: number }>,
+  ): Promise<void> {
+    if (!this.resend || orders.length === 0) return
+
+    const rows = orders
+      .map((o) => {
+        const href = `${this.frontendUrl}/pedidos/seguimiento?token=${encodeURIComponent(o.trackingToken)}`
+        const date = o.createdAt.toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })
+        return `
+          <tr>
+            <td style="padding:12px 0;border-bottom:1px solid #e5e7eb;">
+              <p style="margin:0 0 4px;font-size:14px;font-weight:700;color:#111827;">
+                Pedido #${o.id.slice(-8).toUpperCase()}
+              </p>
+              <p style="margin:0 0 8px;font-size:13px;color:#6b7280;">${date} · ${this.formatCOP(o.total)}</p>
+              <a href="${href}" style="font-size:14px;color:#e60000;font-weight:700;text-decoration:none;">
+                Ver el estado de este pedido →
+              </a>
+            </td>
+          </tr>`
+      })
+      .join('')
+
+    const { error } = await this.resend.emails.send({
+      from: this.from,
+      to: customerEmail,
+      subject: 'Tus enlaces de seguimiento — Motek Store',
+      html: this.buildTrackingLinksEmail(rows, orders.length),
+    })
+    if (error) {
+      this.logger.error(`sendGuestTrackingLinks failed email=${customerEmail}: ${JSON.stringify(error)}`)
+    }
+  }
+
+  private buildTrackingLinksEmail(rows: string, count: number): string {
+    return /* html */ `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Tus enlaces de seguimiento</title>
+</head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+    <tr>
+      <td align="center" style="padding:32px 16px;">
+        <table role="presentation" width="100%" style="max-width:560px;" cellspacing="0" cellpadding="0">
+          <tr>
+            <td style="background:#1a1a1a;border-radius:12px 12px 0 0;padding:24px 32px;text-align:center;">
+              <p style="margin:0;font-size:22px;font-weight:700;color:#e60000;letter-spacing:-0.5px;">
+                ⚡ Motek Store
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#ffffff;padding:36px 32px;">
+              <p style="font-size:40px;margin:0 0 12px;">🔎</p>
+              <h1 style="margin:0 0 12px;font-size:22px;font-weight:700;color:#111827;">
+                Tus enlaces de seguimiento
+              </h1>
+              <p style="margin:0 0 24px;font-size:15px;color:#374151;line-height:1.6;">
+                Encontramos ${count} ${count === 1 ? 'pedido asociado' : 'pedidos asociados'} a este correo.
+                Estos enlaces son personales: cualquiera que los tenga puede ver el pedido, así que no los compartas.
+              </p>
+              <table role="presentation" width="100%" cellspacing="0" cellpadding="0">${rows}</table>
+              <p style="margin:24px 0 0;font-size:13px;color:#6b7280;line-height:1.6;">
+                Si no pediste estos enlaces, puedes ignorar este correo.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#f9fafb;border-radius:0 0 12px 12px;padding:20px 32px;text-align:center;">
+              <p style="margin:0;font-size:12px;color:#9ca3af;">Motek Store · Repuestos y accesorios para moto</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`.trim()
   }
 
   /** Email del formulario de PQR (Contáctanos) — se envía al correo de soporte de la tienda. */

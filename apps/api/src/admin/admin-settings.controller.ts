@@ -33,6 +33,21 @@ export class AdminSettingsController {
     return { success: true, enabled: dto.enabled }
   }
 
+  @Patch('guest-checkout')
+  @ApiOperation({
+    summary: 'Habilitar/deshabilitar la compra sin registro (guest checkout). '
+      + 'Deshabilitado por defecto: es un kill-switch para apagar el flujo sin redeploy '
+      + 'si aparece abuso, sin afectar en nada a los clientes con cuenta.',
+  })
+  async toggleGuestCheckout(@Body() dto: ToggleSettingDto) {
+    await this.prisma.client.settings.upsert({
+      where: { key: 'GUEST_CHECKOUT_ENABLED' },
+      update: { value: dto.enabled ? 'true' : 'false' },
+      create: { key: 'GUEST_CHECKOUT_ENABLED', value: dto.enabled ? 'true' : 'false' },
+    })
+    return { success: true, enabled: dto.enabled }
+  }
+
   @Patch('shipping-online')
   @ApiOperation({
     summary: 'Habilitar/deshabilitar que el flete de pedidos pagados en línea se sume al cobro de '
