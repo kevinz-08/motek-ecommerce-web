@@ -1,6 +1,7 @@
 import { ICouponRepository } from '@/domain/repositories/ICouponRepository'
 import { IOrderRepository } from '@/domain/repositories/IOrderRepository'
 import { isCouponExpired, calculateDiscount } from '@/domain/entities/Coupon'
+import { AccountRequiredReason } from '@/domain/entities/Customer'
 import { Result, ok, err, AppError } from '@/domain/shared/Result'
 
 export interface ValidateCouponItem {
@@ -13,9 +14,22 @@ export interface ValidateCouponItem {
   quantity: number
 }
 
+/**
+ * Identidad frente a la que se evalúan las restricciones del cupón.
+ *
+ * Un invitado no aporta `userId` porque no hay ninguno en el que confiar: el
+ * email del checkout no está verificado. Deliberadamente NO se incluye su email
+ * acá — validar "una vez por cliente" contra un email sin verificar es teatro:
+ * `juan+1@gmail.com`, `juan+2@gmail.com`… lo saltan en segundos, y el margen
+ * perdido es real.
+ */
+export type CouponIdentity =
+  | { kind: 'user'; userId: string }
+  | { kind: 'guest' }
+
 export interface ValidateCouponInput {
   code: string
-  userId: string
+  identity: CouponIdentity
   items: ValidateCouponItem[]
 }
 
@@ -33,7 +47,8 @@ export interface ValidateCouponOutput {
  *   1. El cupón existe.
  *   2. isActive = true (desactivación manual del admin).
  *   3. No expiró (evaluación lazy — sin cron job).
- *   4. Restricción de uso por cliente (ONCE_PER_CUSTOMER o FIRST_PURCHASE).
+ *   4. Restricción de uso por cliente (ONCE_PER_CUSTOMER o FIRST_PURCHASE) —
+ *      requiere identidad probada; un invitado recibe UNAUTHORIZED.
  *   5. Al menos un ítem del carrito está dentro del scope del cupón.
  *
  * Scope con cascada jerárquica:
@@ -63,15 +78,32 @@ export class ValidateCoupon {
       return err(new AppError('VALIDATION_ERROR', 'Cupón vencido'))
     }
 
-    if (coupon.restriction === 'ONCE_PER_CUSTOMER') {
-      const alreadyUsed = await this.orderRepo.existsByCouponAndUser(input.code, input.userId)
+    // Restricciones que dependen del historial del cliente: solo evaluables
+    // sobre una identidad probada. Para un invitado no se degrada la validación
+    // (sería burlable con alias de email) — se exige cuenta y punto.
+    //
+    // El mensaje dice "requiere iniciar sesión", nunca "ya usaste este cupón":
+    // lo segundo revelaría historial de compras de un email ajeno a cualquiera
+    // que lo escriba en el checkout.
+    if (coupon.restriction !== 'NONE' && input.identity.kind === 'guest') {
+      return err(
+        new AppError(
+          'UNAUTHORIZED',
+          'Este cupón requiere que inicies sesión con tu cuenta',
+          { reason: 'RESTRICTED_COUPON' satisfies AccountRequiredReason },
+        ),
+      )
+    }
+
+    if (coupon.restriction === 'ONCE_PER_CUSTOMER' && input.identity.kind === 'user') {
+      const alreadyUsed = await this.orderRepo.existsByCouponAndUser(input.code, input.identity.userId)
       if (alreadyUsed) {
         return err(new AppError('VALIDATION_ERROR', 'Ya utilizaste este cupón'))
       }
     }
 
-    if (coupon.restriction === 'FIRST_PURCHASE') {
-      const hasPriorOrders = await this.orderRepo.hasApprovedOrders(input.userId)
+    if (coupon.restriction === 'FIRST_PURCHASE' && input.identity.kind === 'user') {
+      const hasPriorOrders = await this.orderRepo.hasApprovedOrders(input.identity.userId)
       if (hasPriorOrders) {
         return err(new AppError('VALIDATION_ERROR', 'Este cupón es exclusivo para tu primera compra'))
       }

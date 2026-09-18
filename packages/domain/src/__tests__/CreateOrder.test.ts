@@ -37,6 +37,9 @@ function makeOrder(overrides?: Partial<Order>): Order {
   return {
     id: 'order-1',
     userId: 'user-1',
+    guestId: null,
+    contactEmail: 'cliente@motek.test',
+    trackingToken: 'tok-test-order-1',
     status: 'PENDING',
     total: 5000000,
     shippingAddress: {
@@ -97,7 +100,7 @@ describe('CreateOrder', () => {
     } as unknown as IPaymentService
 
     const result = await new CreateOrder(orderRepo, productRepo, paymentService).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 2 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -126,7 +129,7 @@ describe('CreateOrder', () => {
     } as unknown as IPaymentService
 
     await new CreateOrder(orderRepo, productRepo, paymentService).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 3 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -151,7 +154,7 @@ describe('CreateOrder', () => {
       productRepo,
       {} as IPaymentService,
     ).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 5 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -172,7 +175,7 @@ describe('CreateOrder', () => {
       productRepo,
       {} as IPaymentService,
     ).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-inexistente', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -189,7 +192,7 @@ describe('CreateOrder', () => {
       { findById: vi.fn() } as unknown as IProductRepository,
       {} as IPaymentService,
     ).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 0 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -216,7 +219,7 @@ describe('CreateOrder', () => {
     const paymentService = { createTransaction } as unknown as IPaymentService
 
     const result = await new CreateOrder(orderRepo, productRepo, paymentService).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 2 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -248,7 +251,7 @@ describe('CreateOrder', () => {
       productRepo,
       {} as IPaymentService,
     ).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -276,7 +279,7 @@ describe('CreateOrder', () => {
     const quoteShipping = makeQuoteShippingMock(ok({ quotedShippingTotal: 9000, freeShipping: false }))
 
     const result = await new CreateOrder(orderRepo, productRepo, paymentService, quoteShipping).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 2 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -307,7 +310,7 @@ describe('CreateOrder', () => {
     const quoteShipping = makeQuoteShippingMock(ok({ quotedShippingTotal: 0, freeShipping: true }))
 
     await new CreateOrder(orderRepo, productRepo, paymentService, quoteShipping).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -333,7 +336,7 @@ describe('CreateOrder', () => {
     const quoteShipping = makeQuoteShippingMock(err(new AppError('INTERNAL_ERROR', 'Vendelo caído')))
 
     const result = await new CreateOrder(orderRepo, productRepo, paymentService, quoteShipping).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -362,7 +365,7 @@ describe('CreateOrder', () => {
     const incompleteAddress = { ...SHIPPING, cityCode: undefined, subdivisionCode: undefined }
 
     const result = await new CreateOrder(orderRepo, productRepo, paymentService, quoteShipping).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: incompleteAddress,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -391,7 +394,7 @@ describe('CreateOrder', () => {
 
     // Sin 4º argumento — mismo patrón que el resto de los tests de este archivo.
     const result = await new CreateOrder(orderRepo, productRepo, paymentService).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -419,7 +422,7 @@ describe('CreateOrder', () => {
     const quoteShipping = makeQuoteShippingMock(ok({ quotedShippingTotal: 50000, freeShipping: false }))
 
     await new CreateOrder(orderRepo, productRepo, paymentService, quoteShipping).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -443,7 +446,7 @@ describe('CreateOrder', () => {
     const quoteShipping = makeQuoteShippingMock(ok({ quotedShippingTotal: 9000, freeShipping: false }))
 
     await new CreateOrder(orderRepo, productRepo, {} as IPaymentService, quoteShipping).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -470,7 +473,7 @@ describe('CreateOrder', () => {
     const quoteShipping = makeQuoteShippingMock(ok({ quotedShippingTotal: 9000, freeShipping: false }))
 
     const result = await new CreateOrder(orderRepo, productRepo, paymentService, quoteShipping).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -503,7 +506,7 @@ describe('CreateOrder', () => {
     } as unknown as IPaymentService
 
     await new CreateOrder(orderRepo, productRepo, paymentService).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -537,7 +540,7 @@ describe('CreateOrder', () => {
     const validateCoupon = makeValidateCouponMock(2000000, ['prod-1'])
 
     await new CreateOrder(orderRepo, productRepo, paymentService, undefined, validateCoupon).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -568,7 +571,7 @@ describe('CreateOrder', () => {
     const validateCoupon = makeValidateCouponMock(9999999, ['prod-1'])
 
     await new CreateOrder(orderRepo, productRepo, paymentService, undefined, validateCoupon).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -593,7 +596,7 @@ describe('CreateOrder', () => {
       undefined,
       validateCoupon,
     ).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -620,7 +623,7 @@ describe('CreateOrder', () => {
     const validateCoupon = { execute: vi.fn() } as unknown as ValidateCoupon
 
     await new CreateOrder(orderRepo, productRepo, paymentService, undefined, validateCoupon).execute({
-      userId: 'user-1',
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
       items: [{ productId: 'prod-1', quantity: 1 }],
       shippingAddress: SHIPPING,
       buyer: { idType: 'CC', idNumber: '1000123456' },
@@ -629,5 +632,132 @@ describe('CreateOrder', () => {
 
     expect(validateCoupon.execute).not.toHaveBeenCalled()
     expect(create).toHaveBeenCalledWith(expect.objectContaining({ discountAmount: 0 }))
+  })
+
+  // ── Guest checkout ──────────────────────────────────────────────────────────
+
+  describe('comprador invitado', () => {
+    const GUEST = {
+      kind: 'guest' as const,
+      email: 'invitado@motek.test',
+      name: 'Carlos Pérez',
+      phone: '3001234567',
+    }
+
+    it('rechaza COD con UNAUTHORIZED y no toca la BD ni la pasarela', async () => {
+      const findById = vi.fn()
+      const createPaidOrder = vi.fn()
+      const createTransaction = vi.fn()
+
+      const result = await new CreateOrder(
+        { createPaidOrder } as unknown as IOrderRepository,
+        { findById } as unknown as IProductRepository,
+        { createTransaction } as unknown as IPaymentService,
+      ).execute({
+        customer: GUEST,
+        items: [{ productId: 'prod-1', quantity: 1 }],
+        shippingAddress: SHIPPING,
+        buyer: { idType: 'CC', idNumber: '1000123456' },
+        paymentProvider: 'COD',
+      })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error.code).toBe('UNAUTHORIZED')
+        expect(result.error.details).toMatchObject({ reason: 'COD_PAYMENT' })
+      }
+      // El corte ocurre antes de cualquier efecto: ni se resuelven productos, ni
+      // se crea el pedido, ni se descuenta stock.
+      expect(findById).not.toHaveBeenCalled()
+      expect(createPaidOrder).not.toHaveBeenCalled()
+      expect(createTransaction).not.toHaveBeenCalled()
+    })
+
+    it('permite pago en línea y propaga la identidad de invitado al repositorio', async () => {
+      const product = makeProduct()
+      const order = makeOrder({ userId: null, guestId: 'guest-1', contactEmail: GUEST.email })
+
+      const create = vi.fn().mockResolvedValue(order)
+      const result = await new CreateOrder(
+        { create } as unknown as IOrderRepository,
+        { findById: vi.fn().mockResolvedValue(product) } as unknown as IProductRepository,
+        {
+          createTransaction: vi.fn().mockResolvedValue({
+            externalId: null, reference: 'ref', integritySignature: 'sig', publicKey: 'pk',
+            amountInCents: order.total, currency: 'COP',
+          }),
+        } as unknown as IPaymentService,
+      ).execute({
+        customer: GUEST,
+        items: [{ productId: 'prod-1', quantity: 1 }],
+        shippingAddress: SHIPPING,
+        buyer: { idType: 'CC', idNumber: '1000123456' },
+        paymentProvider: 'WOMPI',
+      })
+
+      expect(result.ok).toBe(true)
+      expect(create).toHaveBeenCalledWith(expect.objectContaining({ customer: GUEST }))
+    })
+
+    it('valida el cupón con identidad de invitado, sin inventar un userId', async () => {
+      const product = makeProduct()
+      const order = makeOrder({ userId: null, guestId: 'guest-1' })
+
+      const validateCoupon = {
+        execute: vi.fn().mockResolvedValue(ok({ discount: 100000, eligibleProductIds: ['prod-1'] })),
+      } as unknown as ValidateCoupon
+
+      await new CreateOrder(
+        { create: vi.fn().mockResolvedValue(order) } as unknown as IOrderRepository,
+        { findById: vi.fn().mockResolvedValue(product) } as unknown as IProductRepository,
+        {
+          createTransaction: vi.fn().mockResolvedValue({
+            externalId: null, reference: 'ref', integritySignature: 'sig', publicKey: 'pk',
+            amountInCents: order.total, currency: 'COP',
+          }),
+        } as unknown as IPaymentService,
+        undefined,
+        validateCoupon,
+      ).execute({
+        customer: GUEST,
+        items: [{ productId: 'prod-1', quantity: 1 }],
+        shippingAddress: SHIPPING,
+        buyer: { idType: 'CC', idNumber: '1000123456' },
+        paymentProvider: 'WOMPI',
+        couponCode: 'PROMO10',
+      })
+
+      expect(validateCoupon.execute).toHaveBeenCalledWith(
+        expect.objectContaining({ identity: { kind: 'guest' } }),
+      )
+    })
+
+    it('propaga el error del cupón restringido en vez de crear el pedido', async () => {
+      const create = vi.fn()
+      const validateCoupon = {
+        execute: vi.fn().mockResolvedValue(
+          err(new AppError('UNAUTHORIZED', 'Este cupón requiere que inicies sesión con tu cuenta')),
+        ),
+      } as unknown as ValidateCoupon
+
+      const result = await new CreateOrder(
+        { create } as unknown as IOrderRepository,
+        { findById: vi.fn().mockResolvedValue(makeProduct()) } as unknown as IProductRepository,
+        { createTransaction: vi.fn() } as unknown as IPaymentService,
+        undefined,
+        validateCoupon,
+      ).execute({
+        customer: GUEST,
+        items: [{ productId: 'prod-1', quantity: 1 }],
+        shippingAddress: SHIPPING,
+        buyer: { idType: 'CC', idNumber: '1000123456' },
+        paymentProvider: 'WOMPI',
+        couponCode: 'SOLO-PRIMERA-COMPRA',
+      })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('UNAUTHORIZED')
+      expect(create).not.toHaveBeenCalled()
+    })
   })
 })
