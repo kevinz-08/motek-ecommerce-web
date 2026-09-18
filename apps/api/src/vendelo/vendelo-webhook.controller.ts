@@ -106,14 +106,16 @@ export class VendeloWebhookController {
       return { received: true, processed: false, error: result.error.code }
     }
 
-    if (result.value.updated) {
+    // userId null = pedido de invitado: no hay historial cacheado por usuario que
+    // invalidar (el comprador consulta por trackingToken, sin caché de sesión).
+    if (result.value.updated && result.value.userId) {
       this.revalidateOrdersCache(result.value.userId).catch((e) =>
         this.logger.warn(`[VendeloWebhook] No se pudo invalidar caché de pedidos: ${e}`),
       )
     }
 
     this.logger.log(
-      `[VendeloWebhook] orderId=${orderId} userId=${result.value.userId} event=${event} updated=${result.value.updated} status=${result.value.newStatus}`,
+      `[VendeloWebhook] orderId=${orderId} userId=${result.value.userId ?? 'guest'} event=${event} updated=${result.value.updated} status=${result.value.newStatus}`,
     )
     return { received: true, processed: true, updated: result.value.updated }
   }
