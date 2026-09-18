@@ -55,7 +55,22 @@ export default async function AdminPedidosPage({ searchParams }: PageProps) {
         ))}
       </div>
 
-      <PedidosTable orders={orders} />
+      {/* Proyección explícita, no la entidad de dominio completa: `Order` ahora
+          incluye `trackingToken`, que es una credencial. Pasar el objeto entero a
+          un Client Component lo serializaría en el payload RSC del HTML, y el
+          token de cada pedido quedaría a la vista en el navegador del admin. */}
+      <PedidosTable
+        orders={orders.map((o) => ({
+          id: o.id,
+          createdAt: o.createdAt,
+          status: o.status,
+          total: o.total,
+          shippingTotal: o.shippingTotal,
+          paymentProvider: o.paymentProvider,
+          contactEmail: o.contactEmail,
+          isGuest: o.userId === null,
+        }))}
+      />
 
       {/* ── Paginación ─────────────────────────────────────────────────── */}
       {totalPages > 1 && (

@@ -11,6 +11,7 @@ import { formatCOP } from '@/lib/format'
 const PROVIDER_LABELS: Record<string, string> = {
   WOMPI: 'Wompi',
   MERCADO_PAGO: 'Mercado Pago',
+  COD: 'Contra entrega',
 }
 
 export interface OrderRow {
@@ -20,6 +21,10 @@ export interface OrderRow {
   total: number
   shippingTotal: number
   paymentProvider: string
+  /** Email de contacto del pedido — presente tanto para registrados como invitados. */
+  contactEmail: string
+  /** true = compra sin cuenta. Se muestra como badge para no confundirlo con un cliente registrado. */
+  isGuest: boolean
 }
 
 export function PedidosTable({ orders }: { orders: OrderRow[] }) {
@@ -34,6 +39,21 @@ export function PedidosTable({ orders }: { orders: OrderRow[] }) {
       header: 'Fecha',
       hideBelowLg: true,
       cell: (o) => new Date(o.createdAt).toLocaleDateString('es-CO'),
+    },
+    {
+      key: 'cliente',
+      header: 'Cliente',
+      hideBelowLg: true,
+      cell: (o) => (
+        <div className="min-w-0">
+          <span className="block truncate text-xs text-[var(--c-text-3)]">{o.contactEmail}</span>
+          {o.isGuest && (
+            <span className="inline-block mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wide bg-[var(--c-surface-hover)] text-[var(--c-text-4)]">
+              Invitado
+            </span>
+          )}
+        </div>
+      ),
     },
     {
       key: 'provider',

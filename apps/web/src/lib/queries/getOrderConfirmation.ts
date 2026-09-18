@@ -27,9 +27,25 @@ export type OrderConfirmation = {
   items: OrderConfirmationItem[]
 }
 
-export async function getOrderConfirmation(orderId: string, userId: string): Promise<OrderConfirmation | null> {
+/**
+ * Cómo se autoriza la lectura del pedido.
+ *   { userId }        → dueño registrado; el pedido debe ser suyo.
+ *   { trackingToken } → comprador invitado; el token de 256 bits ES la
+ *                       autorización. Se exige junto con el orderId para que un
+ *                       token válido no sirva para leer otro pedido.
+ */
+export type OrderConfirmationAccess =
+  | { userId: string }
+  | { trackingToken: string }
+
+export async function getOrderConfirmation(
+  orderId: string,
+  access: OrderConfirmationAccess,
+): Promise<OrderConfirmation | null> {
   const order = await prisma.order.findUnique({
-    where: { id: orderId, userId },
+    where: 'userId' in access
+      ? { id: orderId, userId: access.userId }
+      : { id: orderId, trackingToken: access.trackingToken },
     include: {
       items: {
         include: {

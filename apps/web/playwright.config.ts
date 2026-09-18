@@ -29,7 +29,7 @@ export default defineConfig({
     {
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
-      testIgnore: /(checkout|admin-dashboard)\.spec\.ts/,
+      testIgnore: /[\\/](checkout|admin-dashboard)\.spec\.ts$/,
     },
     // Tests autenticados — dependen del setup
     {
@@ -38,7 +38,9 @@ export default defineConfig({
         ...devices['Desktop Chrome'],
         storageState: 'playwright/.auth/user.json',
       },
-      testMatch: /checkout\.spec\.ts/,
+      // Anclado con separador de ruta: sin él, este patrón también capturaría
+      // `guest-checkout.spec.ts`, que debe correr SIN sesión.
+      testMatch: /[\\/]checkout\.spec\.ts$/,
       dependencies: ['setup'],
     },
     // Panel admin — depende de una sesión con rol ADMIN

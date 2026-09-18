@@ -5,9 +5,13 @@
  * persistidos del pedido. No se almacena el PDF — si el formato cambia,
  * los comprobantes históricos lo reflejan automáticamente.
  *
- * Autorización:
- *   - El dueño del pedido (session.user.id === order.userId)
+ * Autorización — cualquiera de estas tres:
+ *   - El dueño registrado del pedido (session.user.id === order.userId)
  *   - Cualquier usuario con role === 'ADMIN'
+ *   - Un `?token=` que coincida con el `trackingToken` del pedido — es la vía
+ *     del comprador invitado, que no tiene sesión. El token de 256 bits es la
+ *     credencial; se compara contra ESTE pedido, así que un token válido no
+ *     sirve para descargar el comprobante de otro.
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { renderToBuffer } from '@react-pdf/renderer'
@@ -16,11 +20,14 @@ import { prisma } from '@/infrastructure/database/prisma-client'
 import { ReceiptPdf, type ReceiptData } from '@/lib/receipt/ReceiptPdf'
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const session = await auth()
-  if (!session?.user) {
+  const token = req.nextUrl.searchParams.get('token')
+
+  // Sin sesión y sin token no hay nada que evaluar.
+  if (!session?.user && !token) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
@@ -31,6 +38,7 @@ export async function GET(
     include: {
       items: { include: { product: { select: { sku: true, name: true } } } },
       payment: true,
+      // Null en pedidos de invitado — el email sale de contactEmail, no de acá.
       user: { select: { id: true, email: true } },
     },
   })
@@ -39,9 +47,13 @@ export async function GET(
     return NextResponse.json({ error: 'Pedido no encontrado' }, { status: 404 })
   }
 
-  const isAdmin = session.user.role === 'ADMIN'
-  const isOwner = session.user.id === order.userId
-  if (!isAdmin && !isOwner) {
+  const isAdmin = session?.user?.role === 'ADMIN'
+  const isOwner = Boolean(session?.user?.id) && session?.user?.id === order.userId
+  // Comparación directa contra el pedido ya cargado: el token no se busca por
+  // sí solo, siempre va atado al orderId de la ruta.
+  const hasValidToken = Boolean(token) && token === order.trackingToken
+
+  if (!isAdmin && !isOwner && !hasValidToken) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -61,7 +73,8 @@ export async function GET(
       idType: order.buyerIdType,
       idNumber: order.buyerIdNumber,
       businessName: order.buyerBusinessName ?? undefined,
-      email: order.user.email,
+      // contactEmail está siempre presente; `user` es null en pedidos de invitado.
+      email: order.contactEmail,
       phone: shipping.phone,
       address: shipping.address,
       city: shipping.city,
