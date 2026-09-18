@@ -71,7 +71,10 @@ apps/web               Next.js 16 — SSR reads Prisma directly; mutations go th
 | Concern | File |
 |---------|------|
 | Auth config (NextAuth v5) | `apps/web/src/lib/auth.ts` |
-| Route protection (proxy) | `apps/web/src/proxy.ts` |
+| Route protection (proxy) | `apps/web/src/proxy.ts` (solo `/admin/*`) |
+| Guest checkout (API) | `apps/api/src/orders/guest-orders.controller.ts` |
+| Captcha (Turnstile) | `apps/api/src/infrastructure/services/TurnstileService.ts` |
+| Seguimiento sin sesión | `apps/web/src/app/(store)/pedidos/seguimiento/page.tsx` |
 | API HTTP client factory | `apps/web/src/lib/api-client.ts` |
 | Cart state (Zustand) | `apps/web/src/lib/cart.ts` |
 | NestJS DI symbols | `apps/api/src/infrastructure/injection-tokens.ts` |
@@ -140,6 +143,28 @@ All prices are integers (centavos COP). **Never** use floats for money.
 // Store
 Math.round(parseFloat(input) * 100)
 ```
+
+## Guest Checkout
+
+La compra sin registro convive con el flujo autenticado; **ninguna** de las dos rutas
+comparte handler con la otra.
+
+- `Order.userId` es nullable. Un pedido pertenece a un `User` **o** a un
+  `GuestCustomer`, nunca a ambos — lo garantiza el CHECK `order_owner_exclusive`
+  (SQL crudo; Prisma no gestiona constraints CHECK).
+- `Order.contactEmail` está **siempre** presente. Webhooks, `EmailQueueService` y
+  `VendeloService` lo leen de ahí: no hacer join a `User` para obtener el email.
+- `Order.trackingToken` (32 bytes base64url) es una **credencial**. Solo sale en la
+  respuesta de `POST /orders/guest` y en el correo. Nunca en listados, logs, ni en
+  props de Client Components (se serializan en el payload RSC).
+- **COD y cupones restringidos exigen cuenta.** Las reglas viven en el dominio
+  (`CreateOrder` paso 0, `ValidateCoupon`), no en el controlador, para que valgan
+  en cualquier caller.
+- Un pedido de invitado se vincula a una cuenta solo con propiedad del email
+  probada: login explícito (`POST /orders/claim`) o verificación de OTP al
+  registrarse. Nunca automáticamente en el checkout.
+- Kill-switch: `Settings.GUEST_CHECKOUT_ENABLED`, **default `false`**.
+- Captcha obligatorio (Cloudflare Turnstile), fail-closed.
 
 ## Authentication Flow
 

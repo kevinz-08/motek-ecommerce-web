@@ -79,7 +79,7 @@ apps/web              Next.js 16 — SSR reads Prisma directly; mutations go thr
 
 ## Next.js 16 quirks
 
-- **Route protection uses `proxy.ts`** (not `middleware.ts`). Export is `export const proxy` (not `default`). Runs on Node.js runtime, not Edge.
+- **Route protection uses `proxy.ts`** (not `middleware.ts`). Export is `export const proxy` (not `default`). Runs on Node.js runtime, not Edge. Solo protege `/admin/*`: `/checkout` es público desde que existe el guest checkout.
 - **`next.config.ts`** sets `reactCompiler: true` and `turbopack.root` pointing to monorepo root (so Turbopack compiles `packages/*`). Wrapped with `withSentryConfig` (sourcemaps disabled by default).
 - **Auth:** NextAuth v5 beta with JWT strategy (required for Credentials + PrismaAdapter). `apps/web/src/lib/auth.ts` is the single config. Tokens carry `accessToken` (NestJS JWT) for API calls.
 - **Zustand cart** persists to `localStorage["motek-store-cart:{userId}"]`.
@@ -106,6 +106,7 @@ apps/web              Next.js 16 — SSR reads Prisma directly; mutations go thr
 - **Stock decremented only on APPROVED webhook** — not on order creation. `decrementStock(id, quantity)` is atomic. Both Wompi and Mercado Pago webhooks are idempotent (checks `order.status` before acting). Wompi: SHA-256 signature. Mercado Pago: HMAC-SHA256 + extra API call.
 - **Cache invalidation:** Admin mutations call `POST /api/admin/revalidate` with `{ tags: string[] }` (requires ADMIN session). Use `CACHE_TAGS` constants from `apps/web/src/lib/cache-tags.ts`.
 - **Auth flow:** Credentials → NextAuth `authorize()` → `POST /auth/login` (NestJS) → NestJS JWT in session as `accessToken`. Google OAuth → PrismaAdapter → `jwt` callback → `POST /auth/session-token` with `x-internal-secret` → NestJS JWT.
+- **Guest checkout:** `Order.userId` es nullable (dueño: `User` **o** `GuestCustomer`, nunca ambos — CHECK `order_owner_exclusive`). `Order.contactEmail` siempre presente: leer el email de ahí, nunca por join a `User`. `Order.trackingToken` es una credencial — jamás en listados, logs ni props de Client Components. COD y cupones restringidos exigen cuenta (regla en el dominio). Kill-switch `Settings.GUEST_CHECKOUT_ENABLED`, default `false`. Captcha Turnstile fail-closed en `POST /orders/guest`.
 - **Admin triple-layer protection:** (1) `proxy.ts` redirects non-ADMIN, (2) `admin/layout.tsx` server-side check, (3) NestJS `@Roles('ADMIN')` guard.
 
 ## Deployment
