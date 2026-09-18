@@ -539,3 +539,79 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `HISTORIAL_TECNICO.md` — esta entrada.
 
 **Verificación:** `git status` limpio tras el último commit (0 archivos sin rastrear); `git log --stat` suma exactamente los 514 archivos inventariados antes de empezar; ningún `.env` real quedó incluido (solo los `.env.example`), confirmado contra las reglas de `.gitignore`. No se ejecutó `push`: el repositorio queda listo para publicar sin remoto configurado.
+
+## 2026-09-07 — Guest checkout: compra sin registro, seguimiento por token y captcha Turnstile
+
+**Problema/Motivo:** el checkout exigía sesión (`proxy.ts` redirigía a `/auth/login`), así que todo visitante sin cuenta abandonaba antes de comprar. Se abre la compra como invitado sin tocar el flujo autenticado, con dos decisiones de negocio tomadas de forma explícita: **el pago contra entrega y los cupones con restricción por cliente siguen exigiendo cuenta** (sin identidad probada no hay forma de medir el riesgo de un pedido que se confirma sin autorización de pago, ni de impedir que un cupón "una vez por cliente" se reclame con alias de correo), y el flujo público se protege con **Cloudflare Turnstile**.
+
+**Cambios:**
+
+*Base de datos (3 migraciones: expand → backfill → contract)*
+
+- `packages/database/prisma/schema.prisma` — `Order.userId` pasa a nullable; nuevos `Order.guestId`, `Order.contactEmail` y `Order.trackingToken` (`@unique`); índice `[contactEmail, createdAt]`; nuevo modelo `GuestCustomer` (email **no** único a propósito: unificar por email dejaría que un tercero acumule historial sobre un correo ajeno).
+- `packages/database/prisma/migrations/20260907120000_guest_checkout_expand` — solo estructura nullable; segura con el código anterior corriendo. Recrea la FK `Order_userId_fkey` (RESTRICT → SET NULL) para no dejar drift permanente en `prisma migrate diff`.
+- `packages/database/prisma/migrations/20260907120100_guest_checkout_backfill` — `contactEmail` desde `User.email`; `trackingToken` con dos `gen_random_uuid()` concatenados (nativo desde PostgreSQL 13, sin pgcrypto). Idempotente: solo toca filas NULL.
+- `packages/database/prisma/migrations/20260907120200_guest_checkout_contract` — `NOT NULL`, `UNIQUE` y el CHECK `order_owner_exclusive` (`(userId IS NULL) <> (guestId IS NULL)`), que Prisma no sabe expresar. **Aplicar con el código nuevo ya desplegado.**
+
+*Dominio*
+
+- `packages/domain/src/entities/Customer.ts` (nuevo) — `OrderCustomer` como union discriminado (`user` | `guest`), no un `userId?` opcional: obliga al compilador a exigir una decisión explícita en cada regla que dependa de la identidad.
+- `packages/domain/src/use-cases/orders/CreateOrder.ts` — `userId` pasa a `customer`. **Paso 0: COD con `kind: 'guest'` devuelve `UNAUTHORIZED`** antes de tocar la BD o la pasarela. La regla vive acá y no en el controlador para que valga en cualquier caller futuro.
+- `packages/domain/src/use-cases/coupons/ValidateCoupon.ts` — `userId` pasa a `identity`. Toda restricción distinta de `NONE` con identidad de invitado devuelve `UNAUTHORIZED` con mensaje "requiere iniciar sesión" — nunca "ya utilizaste este cupón", que revelaría el historial de compras de un correo ajeno.
+- `packages/domain/src/use-cases/orders/ClaimGuestOrders.ts` (nuevo) — vincula pedidos de invitado a una cuenta. Transición de un solo sentido e idempotente.
+- `packages/domain/src/entities/Order.ts`, `packages/domain/src/repositories/IOrderRepository.ts` — campos nuevos y cuatro métodos: `findByTrackingToken`, `findUnclaimedByEmail`, `claimOrders`, `countPendingByEmailSince`.
+- `packages/domain/src/use-cases/orders/SyncShipmentStatus.ts` — el `userId` de salida pasa a `string | null` (un pedido de invitado no tiene caché por usuario que invalidar).
+
+*API*
+
+- `apps/api/src/orders/guest-orders.controller.ts` (nuevo) — `POST /orders/guest`, `GET /orders/track/:token`, `POST /orders/track/request-link`. Controlador **separado** del autenticado: el `JwtAuthGuard` es global y un handler "a veces autenticado" obliga a ramificar la identidad dentro del método, que es donde nacen los bugs de autorización.
+- `apps/api/src/infrastructure/services/TurnstileService.ts` (nuevo) — verificación contra Cloudflare, **fail-closed** en los cuatro casos (token ausente, token inválido, secret sin configurar, Cloudflare inalcanzable). Los dos últimos se loguean a nivel `error` para que lleguen a Sentry como incidente y no como ruido.
+- `apps/api/src/orders/orders.controller.ts` — `POST /orders/claim`, que toma el email del JWT y nunca del body.
+- `apps/api/src/auth/auth.service.ts` — tras verificar el OTP se auto-vinculan los pedidos de invitado: es el primer momento del registro en que la propiedad del correo queda probada. Un fallo acá se loguea pero no rompe la verificación.
+- `apps/api/src/coupons/coupons.controller.ts` — `POST /coupons/validate-guest` (público, con throttle propio). No es una versión relajada: aplica las mismas restricciones.
+- `apps/api/src/payments/wompi.controller.ts`, `apps/api/src/payments/mercadopago.controller.ts`, `apps/api/src/infrastructure/services/VendeloOrderQueueService.ts` — el email sale de `order.contactEmail`; se elimina el join a `User`, que no existe para invitados.
+- `apps/api/src/admin/admin-settings.controller.ts` — `PATCH /admin/settings/guest-checkout`, kill-switch con **default `false`**.
+- `apps/api/src/main.ts` — aviso al arrancar si falta `TURNSTILE_SECRET_KEY`, sin abortar: tumbar toda la API por un captcha faltante sería peor que el problema que evita.
+- `apps/api/src/infrastructure/repositories/PrismaOrderRepository.ts` — `trackingToken` con `randomBytes(32)` en base64url; `GuestCustomer` creado anidado, en la misma transacción que el pedido, para no dejar invitados huérfanos si el pedido falla. El `data` pasa a forma *checked* completa (`user: { connect }`, `coupon: { connect }`) porque Prisma no permite mezclarla con la *unchecked*.
+- `apps/web/src/infrastructure/repositories/PrismaOrderRepository.ts` — mismo tratamiento en la copia que usa el panel admin.
+
+*Frontend*
+
+- `apps/web/src/proxy.ts` — `/checkout` sale del matcher; solo queda `/admin/*`.
+- `apps/web/src/components/checkout/CheckoutForm.tsx` — modo invitado: email editable, consentimiento de marketing separado del de T&C, captcha, y COD oculto sin sesión. El aviso "estás comprando como invitado" **nunca** dice si el correo tiene cuenta: eso convertiría el checkout en un oráculo de enumeración de clientes.
+- `apps/web/src/components/checkout/TurnstileWidget.tsx` (nuevo) — render explícito; la prop `resetKey` rehace el widget tras un envío fallido, porque el token es de un solo uso.
+- `apps/web/src/app/(store)/pedidos/seguimiento/page.tsx` y `apps/web/src/app/(store)/pedidos/seguimiento/solicitar/page.tsx` (nuevos) — consulta por token y recuperación del enlace por correo. La segunda responde siempre lo mismo, haya pedidos o no.
+- `apps/web/next.config.ts` — `Referrer-Policy: no-referrer` en las rutas cuyo query string lleva el token; con la política global `strict-origin-when-cross-origin`, el header `Referer` lo filtraría a Cloudinary y Sentry.
+- `apps/web/src/app/api/orders/[id]/comprobante/route.tsx` — autoriza también por `?token=`, comparado contra ESE pedido (un token válido no sirve para descargar el comprobante de otro).
+- `apps/web/src/app/admin/pedidos/page.tsx` — pasa una proyección explícita a `PedidosTable` en vez de la entidad completa: `Order` ahora incluye `trackingToken` y el objeto entero se serializaría en el payload RSC del navegador del admin. Nueva columna "Cliente" con badge *Invitado*.
+- `apps/web/src/components/store/ClaimGuestOrdersBanner.tsx` (nuevo) — vínculo manual desde `/pedidos`.
+- `apps/api/.env.example`, `apps/web/.env.example` — `TURNSTILE_SECRET_KEY` y `NEXT_PUBLIC_TURNSTILE_SITE_KEY`, con las claves de prueba de Cloudflare documentadas para local y E2E.
+
+**Decisiones que se descartaron y por qué:**
+
+- *Usuario fantasma* (un `User` con password null por cada invitado): colisiona con `User.email @unique`, bloquea el registro posterior con ese mismo correo vía el `ConflictException` de `register()`, y deja que el `PrismaAdapter` de NextAuth vincule una cuenta de Google ajena a esa fila.
+- *Vincular el pedido automáticamente* cuando el email coincide con una cuenta existente: metería dirección, teléfono y comprobante del comprador real en el panel de otra persona. Es una fuga de datos personales, no una comodidad.
+- *Avisar en el checkout que el correo ya tiene cuenta*: útil en UX, pero es exactamente lo que convierte el formulario en un oráculo para saber quién está registrado en la tienda.
+
+**Verificación:**
+
+- `pnpm type-check` — 6/6 paquetes sin errores.
+- `pnpm lint` — 0 errores (quedan 24 warnings de estilo preexistentes).
+- `pnpm --filter @motek/domain test` — 220 tests en 15 archivos, todos en verde. Coverage 87,14 % statements / 92,07 % branches, por encima de los umbrales de 80/70. Casos nuevos: COD de invitado cortado antes de tocar BD y pasarela, cupón restringido rechazado sin consultar el historial, `ClaimGuestOrders` idempotente y con email normalizado.
+- `pnpm --filter @motek/api test` — 196 tests en 16 archivos, incluidos los 17 nuevos de `guest-orders.controller`: kill-switch cerrado por defecto, 503 frente a 403 según de quién sea la culpa del captcha, tope de pedidos PENDING por email, `request-link` con respuesta idéntica haya o no pedidos, y la proyección de seguimiento verificada contra la fuga del token.
+- `apps/web/e2e/guest-checkout.spec.ts` (nuevo) — 8 specs sin sesión. `apps/web/playwright.config.ts` corrige de paso los patrones de proyecto: `/checkout\.spec\.ts/` sin anclar también capturaba `guest-checkout.spec.ts` y lo habría corrido autenticado, justo lo contrario de lo que prueba. El sanity check de `checkout.spec.ts` que esperaba el redirect a login se actualizó al comportamiento nuevo.
+- **No ejecutado:** las migraciones contra la base real (`pnpm db:migrate`) y una compra de punta a punta contra el sandbox de Wompi. Ambas requieren credenciales y base de datos; quedan como paso previo al despliegue.
+
+---
+
+## 2026-09-16 — Actualizar llaves de producción de Wompi (local, sin activar)
+
+**Problema/Motivo:** El comercio recibió nuevas llaves de producción de Wompi (merchant real, no las de prueba que llevaban meses en el bloque `# Wompi - prod` comentado de los `.env` locales).
+
+**Cambios:**
+
+- `apps/api/.env` — reemplazadas las 4 llaves del bloque comentado `# Wompi - prod (desactivado durante testing)` (`WOMPI_PUBLIC_KEY`, `WOMPI_PRIVATE_KEY`, `WOMPI_INTEGRITY_SECRET`, `WOMPI_EVENTS_SECRET`). Bloque sigue comentado; el sandbox sigue activo para desarrollo local.
+- `apps/web/.env.local` — mismo reemplazo en el bloque comentado `# Wompi - prod`.
+- Archivos no versionados (`.gitignore`), no requiere commit.
+
+**Verificación:** No aplica activación en runtime — cambio de valores en bloque comentado, sandbox sigue siendo el activo en local. Falta activar el bloque prod (y todas las demás variables de entorno productivas listadas abajo) al momento real del despliegue.
