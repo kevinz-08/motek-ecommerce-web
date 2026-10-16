@@ -40,6 +40,10 @@ function makeShipment(overrides?: Partial<Shipment>): Shipment {
     trackingNumber: null,
     carrier: null,
     labelUrl: null,
+    trackingStatus: null,
+    deliveryAttempts: null,
+    deliveredAt: null,
+    trackingUpdatedAt: null,
     createdAt: new Date('2025-01-01'),
     updatedAt: new Date('2025-01-01'),
     ...overrides,
@@ -59,6 +63,7 @@ function makeShipmentRepo(shipment: Shipment | null, applied = true): IShipmentR
     findByOrderId: vi.fn().mockResolvedValue(shipment),
     upsert: vi.fn().mockResolvedValue(shipment ?? makeShipment()),
     atomicUpdateStatus: vi.fn().mockResolvedValue({ applied }),
+    updateTrackingDetails: vi.fn().mockResolvedValue(undefined),
   } as unknown as IShipmentRepository
 }
 
@@ -300,6 +305,113 @@ describe('SyncShipmentStatus', () => {
 
       expect(result.ok).toBe(false)
       if (!result.ok) expect(result.error.code).toBe('NOT_FOUND')
+    })
+  })
+
+  describe('detalle de seguimiento', () => {
+    it('un evento sin datos de envío NO borra la guía guardada (no envía null al repo)', async () => {
+      const shipmentRepo = makeShipmentRepo(makeShipment({ status: 'SHIPPED', trackingNumber: 'TRK-001', carrier: 'Coordinadora' }))
+      const orderRepo = makeOrderRepo(makeOrder())
+
+      await new SyncShipmentStatus(shipmentRepo, orderRepo).execute({
+        orderId: 'order-1',
+        vendelo_status: 'DELIVERED',
+      })
+
+      const extra = vi.mocked(shipmentRepo.atomicUpdateStatus).mock.calls[0][3]
+      expect(extra?.trackingNumber).toBeUndefined()
+      expect(extra?.carrier).toBeUndefined()
+    })
+
+    it('actualiza intentos de entrega y estado fino aunque el status no avance', async () => {
+      const shipmentRepo = makeShipmentRepo(makeShipment({ status: 'INCIDENT', deliveryAttempts: 1 }))
+      const orderRepo = makeOrderRepo(makeOrder())
+
+      const result = await new SyncShipmentStatus(shipmentRepo, orderRepo).execute({
+        orderId: 'order-1',
+        vendelo_status: 'INCIDENT',
+        trackingStatus: 'OUT-FOR-DELIVERY',
+        deliveryAttempts: 2,
+      })
+
+      expect(result.ok && result.value).toMatchObject({ updated: false, detailsUpdated: true })
+      expect(shipmentRepo.atomicUpdateStatus).not.toHaveBeenCalled()
+      expect(shipmentRepo.updateTrackingDetails).toHaveBeenCalledWith('order-1', {
+        trackingStatus: 'OUT-FOR-DELIVERY',
+        deliveryAttempts: 2,
+      })
+    })
+
+    it('no escribe nada si el detalle es igual al guardado (polling repetido)', async () => {
+      const deliveredAt = new Date('2026-10-10T15:00:00Z')
+      const shipmentRepo = makeShipmentRepo(makeShipment({
+        status: 'DELIVERED', trackingNumber: 'TRK-001', trackingStatus: 'DELIVERED', deliveryAttempts: 1, deliveredAt,
+      }))
+      const orderRepo = makeOrderRepo(makeOrder())
+
+      const result = await new SyncShipmentStatus(shipmentRepo, orderRepo).execute({
+        orderId: 'order-1',
+        vendelo_status: 'DELIVERED',
+        trackingNumber: 'TRK-001',
+        trackingStatus: 'DELIVERED',
+        deliveryAttempts: 1,
+        deliveredAt: new Date(deliveredAt.getTime()),
+      })
+
+      expect(result.ok && result.value.detailsUpdated).toBe(false)
+      expect(shipmentRepo.updateTrackingDetails).not.toHaveBeenCalled()
+    })
+
+    it('registra la guía asignada antes del despacho aunque el status no cambie', async () => {
+      const shipmentRepo = makeShipmentRepo(makeShipment({ status: 'READY' }))
+      const orderRepo = makeOrderRepo(makeOrder())
+
+      await new SyncShipmentStatus(shipmentRepo, orderRepo).execute({
+        orderId: 'order-1',
+        vendelo_status: 'READY',
+        trackingNumber: 'TRK-NEW',
+        carrier: 'Coordinadora',
+      })
+
+      expect(shipmentRepo.updateTrackingDetails).toHaveBeenCalledWith('order-1', {
+        trackingNumber: 'TRK-NEW',
+        carrier: 'Coordinadora',
+      })
+    })
+
+    it('en una transición escribe el detalle restante sin repetir guía/transportadora', async () => {
+      const shipmentRepo = makeShipmentRepo(makeShipment({ status: 'SHIPPED' }))
+      const orderRepo = makeOrderRepo(makeOrder())
+      const deliveredAt = new Date('2026-10-12T10:00:00Z')
+
+      await new SyncShipmentStatus(shipmentRepo, orderRepo).execute({
+        orderId: 'order-1',
+        vendelo_status: 'DELIVERED',
+        trackingNumber: 'TRK-001',
+        trackingStatus: 'DELIVERED',
+        deliveredAt,
+      })
+
+      expect(shipmentRepo.updateTrackingDetails).toHaveBeenCalledWith('order-1', {
+        trackingStatus: 'DELIVERED',
+        deliveredAt,
+      })
+    })
+
+    it('al crear el envío guarda también el detalle de seguimiento', async () => {
+      const shipmentRepo = makeShipmentRepo(null)
+      const orderRepo = makeOrderRepo(makeOrder())
+
+      const result = await new SyncShipmentStatus(shipmentRepo, orderRepo).execute({
+        orderId: 'order-1',
+        vendelo_status: 'SHIPPED',
+        trackingNumber: 'TRK-001',
+        trackingStatus: 'TRANSIT',
+      })
+
+      expect(result.ok && result.value.detailsUpdated).toBe(true)
+      expect(shipmentRepo.upsert).toHaveBeenCalledWith('order-1', expect.objectContaining({ trackingNumber: 'TRK-001' }))
+      expect(shipmentRepo.updateTrackingDetails).toHaveBeenCalledWith('order-1', { trackingStatus: 'TRANSIT' })
     })
   })
 })

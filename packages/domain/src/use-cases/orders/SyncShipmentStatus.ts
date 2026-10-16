@@ -1,6 +1,12 @@
 import { IOrderRepository } from '@/domain/repositories/IOrderRepository'
 import { IShipmentRepository } from '@/domain/repositories/IShipmentRepository'
-import { ShipmentStatus, SHIPMENT_STATUS_RANK } from '@/domain/entities/Shipment'
+import {
+  Shipment,
+  ShipmentStatus,
+  ShipmentTrackingDetails,
+  SHIPMENT_STATUS_RANK,
+  TrackingStatus,
+} from '@/domain/entities/Shipment'
 import { OrderStatus } from '@/domain/entities/Order'
 import { Result, ok, err, AppError } from '@/domain/shared/Result'
 
@@ -13,6 +19,14 @@ export interface SyncShipmentStatusInput {
   trackingNumber?: string
   /** Nombre del transportador (ej. "COORDINADORA"). */
   carrier?: string
+  /** Estado fino de la transportadora (ApiOrderShipment.tracking_status). */
+  trackingStatus?: TrackingStatus
+  /** Intentos de entrega realizados por la transportadora. */
+  deliveryAttempts?: number
+  /** Fecha de entrega al destinatario. */
+  deliveredAt?: Date
+  /** Fecha de la última actualización del seguimiento según la transportadora. */
+  trackingUpdatedAt?: Date
 }
 
 export interface SyncShipmentStatusOutput {
@@ -25,6 +39,11 @@ export interface SyncShipmentStatusOutput {
    * comprador consulta su pedido por trackingToken (página sin caché de sesión).
    */
   userId: string | null
+  /**
+   * true si se actualizó el detalle de seguimiento (guía, intentos de entrega,
+   * estado fino) aunque el status no haya cambiado.
+   */
+  detailsUpdated: boolean
 }
 
 /**
@@ -37,6 +56,11 @@ export interface SyncShipmentStatusOutput {
  *     Dos webhooks concurrentes con el mismo evento no aplican el cambio dos veces.
  *   - **Transición de Order.status**: cuando el envío llega a SHIPPED, DELIVERED
  *     o CANCELLED, actualiza también el estado del pedido padre.
+ *   - **Detalle de seguimiento**: guía, transportadora, intentos de entrega y
+ *     estado fino se actualizan aunque el status no avance (ej. un segundo
+ *     intento de entrega mientras sigue en INCIDENT). Un campo ausente en el
+ *     evento NUNCA borra lo guardado: un ORDER_DELIVERED sin datos de envío no
+ *     debe eliminar la guía que llegó con ORDER_SHIPPED.
  *
  * El use case no conoce NestJS, Prisma ni HTTP. Solo habla con IShipmentRepository
  * e IOrderRepository.
@@ -65,7 +89,8 @@ export class SyncShipmentStatus {
     const isForward = incomingRank > currentRank
 
     if (!isCancelled && !isForward) {
-      return ok({ updated: false, newStatus: currentStatus, userId: order.userId })
+      const detailsUpdated = existing ? await this.syncDetails(existing, this.trackingDetails(input)) : false
+      return ok({ updated: false, newStatus: currentStatus, userId: order.userId, detailsUpdated })
     }
 
     // Si no existe registro de envío aún, crearlo primero (upsert inicial)
@@ -75,29 +100,82 @@ export class SyncShipmentStatus {
         trackingNumber: input.trackingNumber ?? null,
         carrier: input.carrier ?? null,
       })
+      // Registro recién creado: el resto del detalle se escribe tal cual
+      const { trackingNumber: _t, carrier: _c, ...rest } = this.trackingDetails(input)
+      const detailsUpdated = Object.keys(rest).length > 0
+      if (detailsUpdated) await this.shipmentRepo.updateTrackingDetails(input.orderId, rest)
       await this.syncOrderStatus(input.orderId, input.vendelo_status)
       await this.maybeRestock(input.orderId, currentStatus, input.vendelo_status)
-      return ok({ updated: true, newStatus: input.vendelo_status, userId: order.userId })
+      return ok({ updated: true, newStatus: input.vendelo_status, userId: order.userId, detailsUpdated })
     }
 
-    // Idempotencia nivel 2: atomic WHERE en BD (protege race conditions entre workers)
+    // Idempotencia nivel 2: atomic WHERE en BD (protege race conditions entre workers).
+    // undefined = no tocar: un evento sin datos de envío no borra la guía guardada.
     const result = await this.shipmentRepo.atomicUpdateStatus(
       input.orderId,
       currentStatus,
       input.vendelo_status,
       {
-        trackingNumber: input.trackingNumber ?? null,
-        carrier: input.carrier ?? null,
+        trackingNumber: input.trackingNumber,
+        carrier: input.carrier,
       },
     )
 
     if (!result.applied) {
-      return ok({ updated: false, newStatus: currentStatus, userId: order.userId })
+      return ok({ updated: false, newStatus: currentStatus, userId: order.userId, detailsUpdated: false })
     }
 
+    // Guía y transportadora ya se escribieron en atomicUpdateStatus
+    const { trackingNumber: _t, carrier: _c, ...rest } = this.trackingDetails(input)
+    const detailsUpdated = await this.syncDetails(existing, rest)
     await this.syncOrderStatus(input.orderId, input.vendelo_status)
     await this.maybeRestock(input.orderId, currentStatus, input.vendelo_status)
-    return ok({ updated: true, newStatus: input.vendelo_status, userId: order.userId })
+    return ok({ updated: true, newStatus: input.vendelo_status, userId: order.userId, detailsUpdated })
+  }
+
+  /** Detalle de seguimiento presente en el evento (omite los campos ausentes). */
+  private trackingDetails(input: SyncShipmentStatusInput): ShipmentTrackingDetails {
+    const details: ShipmentTrackingDetails = {}
+    if (input.trackingNumber) details.trackingNumber = input.trackingNumber
+    if (input.carrier) details.carrier = input.carrier
+    if (input.trackingStatus) details.trackingStatus = input.trackingStatus
+    if (input.deliveryAttempts !== undefined) details.deliveryAttempts = input.deliveryAttempts
+    if (input.deliveredAt) details.deliveredAt = input.deliveredAt
+    if (input.trackingUpdatedAt) details.trackingUpdatedAt = input.trackingUpdatedAt
+    return details
+  }
+
+  /**
+   * Escribe solo los campos que cambiaron respecto a lo guardado — el polling
+   * repite el mismo snapshot cada ciclo y no debe generar escrituras vacías.
+   */
+  private async syncDetails(current: Shipment, details: ShipmentTrackingDetails): Promise<boolean> {
+    const changed: ShipmentTrackingDetails = {}
+    const sameDate = (a: Date | null | undefined, b: Date | null | undefined) =>
+      (a?.getTime() ?? null) === (b?.getTime() ?? null)
+
+    if (details.trackingNumber !== undefined && details.trackingNumber !== current.trackingNumber) {
+      changed.trackingNumber = details.trackingNumber
+    }
+    if (details.carrier !== undefined && details.carrier !== current.carrier) {
+      changed.carrier = details.carrier
+    }
+    if (details.trackingStatus !== undefined && details.trackingStatus !== current.trackingStatus) {
+      changed.trackingStatus = details.trackingStatus
+    }
+    if (details.deliveryAttempts !== undefined && details.deliveryAttempts !== current.deliveryAttempts) {
+      changed.deliveryAttempts = details.deliveryAttempts
+    }
+    if (details.deliveredAt !== undefined && !sameDate(details.deliveredAt, current.deliveredAt)) {
+      changed.deliveredAt = details.deliveredAt
+    }
+    if (details.trackingUpdatedAt !== undefined && !sameDate(details.trackingUpdatedAt, current.trackingUpdatedAt)) {
+      changed.trackingUpdatedAt = details.trackingUpdatedAt
+    }
+
+    if (Object.keys(changed).length === 0) return false
+    await this.shipmentRepo.updateTrackingDetails(current.orderId, changed)
+    return true
   }
 
   /**

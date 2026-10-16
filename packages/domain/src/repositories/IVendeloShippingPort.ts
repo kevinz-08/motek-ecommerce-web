@@ -1,5 +1,5 @@
 import { ShipmentExceptionDetail, ExceptionResolution } from '../entities/ShipmentException'
-import { ShipmentStatus } from '../entities/Shipment'
+import { ShipmentStatus, TrackingStatus } from '../entities/Shipment'
 
 /** Error reportado cuando Vendelo no encuentra el pedido solicitado por ID. */
 export class VendeloOrderNotFoundError extends Error {
@@ -18,9 +18,16 @@ export class VendeloOrderNotFoundError extends Error {
  */
 export interface VendeloOrderSnapshot {
   id: string
+  /** Nuestro ID interno (external_order_id) — permite cruzar resultados en lote. */
+  externalOrderId?: string | null
   status: ShipmentStatus
   trackingNumber: string | null
   carrier: string | null
+  /** Detalle del envío saliente (OUTBOUND), si ya existe. */
+  trackingStatus?: TrackingStatus | null
+  deliveryAttempts?: number | null
+  deliveredAt?: Date | null
+  trackingUpdatedAt?: Date | null
 }
 
 /**
@@ -41,6 +48,11 @@ export interface VendeloQuoteInput {
   items: Array<{
     productId: string
     quantity: number
+    /** Datos del producto que el spec de Venndelo exige en la cotización. */
+    sku?: string
+    name?: string
+    /** Precio unitario en centavos COP. */
+    unitPrice?: number
     weightKg?: number | null
     heightCm?: number | null
     widthCm?: number | null
@@ -87,6 +99,19 @@ export interface IVendeloShippingPort {
    *         debe loguear y continuar con el siguiente pedido, no fallar el batch.
    */
   getOrder(vendeloOrderId: string): Promise<VendeloOrderSnapshot>
+
+  /**
+   * Lee varios pedidos en una sola consulta (`GET /v1/admin/orders` con
+   * `filter[id][$in]`). Los IDs que Vendelo no devuelva simplemente no aparecen
+   * en el resultado — el caller decide si consultarlos uno a uno.
+   */
+  getOrdersBatch(vendeloOrderIds: string[]): Promise<VendeloOrderSnapshot[]>
+
+  /**
+   * Anula el pedido en Vendelo (`POST /v1/admin/orders/{id}/cancel`).
+   * Irreversible. Vendelo rechaza la anulación si el envío ya avanzó.
+   */
+  cancelOrder(vendeloOrderId: string): Promise<{ message: string }>
 
   /**
    * Cotiza el costo de envío de un pedido sin crearlo. Usado por QuoteShipping

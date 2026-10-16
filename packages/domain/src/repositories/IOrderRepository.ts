@@ -151,6 +151,11 @@ export interface IOrderRepository {
    */
   findVendeloOrderIdsBatch(orderIds: string[]): Promise<Array<{ id: string; vendeloOrderId: string | null }>>
   /**
+   * Resuelve nuestro ID de pedido a partir del ID de Vendelo. Fallback del
+   * webhook cuando el evento no trae `external_order_id`. null si no existe.
+   */
+  findIdByVendeloOrderId(vendeloOrderId: string): Promise<string | null>
+  /**
    * Devuelve pedidos cuyo envío está vivo en Vendelo y necesita polling.
    *
    * Filtros aplicados:

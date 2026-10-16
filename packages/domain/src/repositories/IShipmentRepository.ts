@@ -1,4 +1,4 @@
-import { Shipment, ShipmentStatus } from '@/domain/entities/Shipment'
+import { Shipment, ShipmentStatus, ShipmentTrackingDetails } from '@/domain/entities/Shipment'
 
 export interface ShipmentUpdateFields {
   status: ShipmentStatus
@@ -15,6 +15,9 @@ export interface AtomicStatusUpdateResult {
 /**
  * Contrato de acceso a datos de envíos.
  * Implementado por PrismaShipmentRepository en infrastructure/repositories/.
+ *
+ * Convención de campos opcionales: `undefined` = no tocar el valor guardado;
+ * `null` = borrarlo explícitamente.
  */
 export interface IShipmentRepository {
   /** Busca el envío asociado a un pedido interno. Retorna null si no existe aún. */
@@ -43,4 +46,11 @@ export interface IShipmentRepository {
     to: ShipmentStatus,
     extra?: Pick<ShipmentUpdateFields, 'trackingNumber' | 'carrier' | 'labelUrl'>,
   ): Promise<AtomicStatusUpdateResult>
+
+  /**
+   * Actualiza el detalle de seguimiento sin tocar `status` (intentos de entrega,
+   * estado fino de la transportadora, guía asignada antes del despacho, etc.).
+   * Solo escribe los campos definidos. No-op si el envío no existe.
+   */
+  updateTrackingDetails(orderId: string, details: ShipmentTrackingDetails): Promise<void>
 }
