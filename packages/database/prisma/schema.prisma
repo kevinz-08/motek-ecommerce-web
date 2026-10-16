@@ -316,6 +316,8 @@ model Order {
   /// Cubre la búsqueda de pedidos reclamables por email (ClaimGuestOrders) y el
   /// límite anti-abuso de pedidos PENDING por email de contacto.
   @@index([contactEmail, createdAt])
+  /// Resolución del pedido desde webhooks de Vendelo que no traen external_order_id
+  @@index([vendeloOrderId])
 }
 
 /// Comprador que compró sin registrarse (guest checkout).
@@ -352,6 +354,14 @@ model Shipment {
   trackingNumber String?
   carrier        String?
   labelUrl       String?
+  /// Estado fino de la transportadora (ApiOrderShipment.tracking_status). Ej: OUT-FOR-DELIVERY
+  trackingStatus    String?
+  /// Intentos de entrega realizados por la transportadora
+  deliveryAttempts  Int?
+  /// Fecha de entrega al destinatario reportada por Vendelo
+  deliveredAt       DateTime?
+  /// Última actualización del seguimiento según la transportadora
+  trackingUpdatedAt DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
   order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -438,7 +448,7 @@ model VendeloOrderQueue {
   orderId             String
   attempts            Int       @default(0)
   lastError           String?
-  /// PENDING | PROCESSING | SENT | FAILED
+  /// PENDING | PROCESSING | SENT | FAILED | CANCELLED (pedido anulado antes de enviarse)
   status              String    @default("PENDING")
   createdAt           DateTime  @default(now())
   nextRetry           DateTime  @default(now())
@@ -485,6 +495,35 @@ model VendeloCity {
   /// Código de subdivisión dentro de la ciudad. Ej: "02"
   subdivisionCode String
   countryCode     String @default("CO")
+  /// Nombre del departamento según Vendelo. Ej: "Antioquia"
+  subdivisionName String?
+  /// ACTIVE | SUSPENDED — SUSPENDED = Vendelo no recibe pedidos hacia esa ciudad temporalmente
+  serviceStatus   String @default("ACTIVE")
+  /// Mensaje de Vendelo para mostrar cuando el servicio está suspendido
+  serviceUnavailableMessage String?
 
   @@index([name])
+}
+
+/// Credencial OAuth de Venndelo — fila única (id = "default").
+///
+/// El refresh token rota: cada intercambio puede devolver uno nuevo que invalida
+/// el anterior, así que vive aquí (no en una env var estática) y se comparte entre
+/// todas las instancias de Cloud Run. Tokens cifrados con AES-256-GCM
+/// (VENDELO_TOKEN_ENCRYPTION_KEY). Solo una instancia refresca a la vez: toma el
+/// lease (`refreshLeaseHolder`/`refreshLeaseUntil`) y escribe con compare-and-swap
+/// sobre `version`. Ver VendeloOAuthTokenProvider.
+model VendeloCredential {
+  id                    String    @id @default("default")
+  refreshTokenEnc       String
+  refreshTokenExpiresAt DateTime?
+  accessTokenEnc        String?
+  accessTokenExpiresAt  DateTime?
+  /// Se incrementa en cada escritura exitosa de un refresh — guard de compare-and-swap
+  version               Int       @default(0)
+  refreshLeaseHolder    String?
+  refreshLeaseUntil     DateTime?
+  lastRefreshedAt       DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
 }

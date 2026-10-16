@@ -5,6 +5,7 @@ import { Order, ShippingAddress, BuyerInfo, PaymentProvider, DeliveryMethod } fr
 import { OrderCustomer, AccountRequiredReason } from '@/domain/entities/Customer'
 import { QuoteShipping } from '@/domain/use-cases/shipping/QuoteShipping'
 import { ValidateCoupon } from '@/domain/use-cases/coupons/ValidateCoupon'
+import { ICityCoverageRepository, shippingSuspendedMessage } from '@/domain/repositories/ICityCoverageRepository'
 import { Result, ok, err, AppError } from '@/domain/shared/Result'
 
 export interface CreateOrderUseCaseInput {
@@ -94,7 +95,8 @@ export interface CreateOrderOutput {
  * Este use case recibe las dependencias como parámetros del constructor
  * (inyección de dependencias), lo que facilita las pruebas unitarias con mocks.
  * `quoteShipping` es opcional para no romper instanciaciones existentes de 3
- * argumentos que no necesitan cobrar flete en línea.
+ * argumentos que no necesitan cobrar flete en línea. `cityCoverage` también:
+ * sin él no se valida la cobertura de Vendelo (ver paso 0b).
  */
 export class CreateOrder {
   constructor(
@@ -103,6 +105,7 @@ export class CreateOrder {
     private readonly paymentService: IPaymentService,
     private readonly quoteShipping?: QuoteShipping,
     private readonly validateCoupon?: ValidateCoupon,
+    private readonly cityCoverage?: ICityCoverageRepository,
   ) {}
 
   async execute(input: CreateOrderUseCaseInput): Promise<Result<CreateOrderOutput>> {
@@ -122,6 +125,19 @@ export class CreateOrder {
           { reason: 'COD_PAYMENT' satisfies AccountRequiredReason },
         ),
       )
+    }
+
+    // 0b. Cobertura de envío: si Vendelo suspendió el servicio hacia la ciudad de
+    //     destino, el pedido se pagaría pero nunca podría despacharse. Se bloquea
+    //     antes de crear nada. Una ciudad ausente del catálogo local NO bloquea
+    //     (el catálogo puede estar vacío o desactualizado).
+    if (input.deliveryMethod !== 'STORE_PICKUP' && input.shippingAddress.cityCode && this.cityCoverage) {
+      const coverage = await this.cityCoverage.findByCityCode(input.shippingAddress.cityCode)
+      if (coverage?.serviceStatus === 'SUSPENDED') {
+        return err(new AppError('VALIDATION_ERROR', shippingSuspendedMessage(coverage.unavailableMessage), {
+          reason: 'SHIPPING_SUSPENDED',
+        }))
+      }
     }
 
     // 1. Validar stock y calcular el subtotal de productos

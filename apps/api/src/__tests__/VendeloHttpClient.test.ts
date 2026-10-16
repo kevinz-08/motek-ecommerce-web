@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { VendeloHttpClient } from '../infrastructure/services/VendeloHttpClient'
+import type { IVendeloAuthProvider } from '../infrastructure/services/VendeloAuthProvider'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -180,5 +181,101 @@ describe('VendeloHttpClient — Retry en errores de red', () => {
 
     await expect(client.post('/v1/admin/orders', {}, { retryOn5xx: false })).resolves.toBeDefined()
     expect(fetchSpy).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ── Autenticación ─────────────────────────────────────────────────────────────
+
+function makeOAuthProvider(tokens: string[]) {
+  let current = 0
+  const provider = {
+    mode: 'oauth' as const,
+    getAuthHeaders: vi.fn(async () => ({ Authorization: `Bearer ${tokens[current]}` })),
+    invalidate: vi.fn(() => { current = Math.min(current + 1, tokens.length - 1) }),
+  }
+  return provider satisfies IVendeloAuthProvider
+}
+
+function makeClientWith(auth?: IVendeloAuthProvider): VendeloHttpClient {
+  process.env['VENDELO_API_KEY'] = 'test-key'
+  process.env['VENDELO_API_URL'] = 'https://api.test.vendelo.co'
+  const client = new VendeloHttpClient(auth)
+  vi.spyOn(client as unknown as { sleep: (ms: number) => Promise<void> }, 'sleep').mockResolvedValue(undefined)
+  return client
+}
+
+function sentHeaders(fetchSpy: ReturnType<typeof vi.spyOn>, call = 0): Record<string, string> {
+  return (fetchSpy.mock.calls[call][1] as RequestInit).headers as Record<string, string>
+}
+
+describe('VendeloHttpClient — Autenticación', () => {
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('sin proveedor inyectado usa la API Key de la env var (modo heredado)', async () => {
+    const fetchSpy = mockFetch([okResponse({ ok: true })])
+    const client = makeClientWith()
+
+    await client.get('/test')
+
+    expect(client.getAuthMode()).toBe('apikey')
+    expect(sentHeaders(fetchSpy)['X-Venndelo-Api-Key']).toBe('test-key')
+    expect(sentHeaders(fetchSpy)['Authorization']).toBeUndefined()
+  })
+
+  it('con OAuth envía Authorization: Bearer y no la API Key', async () => {
+    const fetchSpy = mockFetch([okResponse({ ok: true })])
+    const client = makeClientWith(makeOAuthProvider(['token-1']))
+
+    await client.get('/test')
+
+    expect(sentHeaders(fetchSpy)['Authorization']).toBe('Bearer token-1')
+    expect(sentHeaders(fetchSpy)['X-Venndelo-Api-Key']).toBeUndefined()
+  })
+
+  it('ante un 401 con OAuth invalida el token y reintenta una sola vez con uno nuevo', async () => {
+    const auth = makeOAuthProvider(['token-viejo', 'token-nuevo'])
+    const fetchSpy = mockFetch([errorResponse(401), okResponse({ ok: true })])
+    const client = makeClientWith(auth)
+
+    await expect(client.get('/test')).resolves.toEqual({ ok: true })
+
+    expect(auth.invalidate).toHaveBeenCalledTimes(1)
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(sentHeaders(fetchSpy, 1)['Authorization']).toBe('Bearer token-nuevo')
+    expect(client.getCircuitState()).toBe('CLOSED')
+  })
+
+  it('si el reintento tras 401 vuelve a dar 401, falla sin entrar en loop', async () => {
+    const auth = makeOAuthProvider(['token-1', 'token-2'])
+    const fetchSpy = mockFetch([errorResponse(401), errorResponse(401), okResponse({ ok: true })])
+    const client = makeClientWith(auth)
+
+    await expect(client.get('/test')).rejects.toThrow('401')
+    expect(fetchSpy).toHaveBeenCalledTimes(2)
+    expect(auth.invalidate).toHaveBeenCalledTimes(1)
+  })
+
+  it('con API Key un 401 no se reintenta (no hay token que refrescar)', async () => {
+    const fetchSpy = mockFetch([errorResponse(401), okResponse({ ok: true })])
+    const client = makeClientWith()
+
+    await expect(client.get('/test')).rejects.toThrow('401')
+    expect(fetchSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('si el proveedor no puede obtener token, no llama a Vendelo ni abre el circuito', async () => {
+    const auth: IVendeloAuthProvider = {
+      mode: 'oauth',
+      getAuthHeaders: vi.fn().mockRejectedValue(new Error('No hay refresh token de Venndelo')),
+      invalidate: vi.fn(),
+    }
+    const fetchSpy = mockFetch([okResponse({ ok: true })])
+    const client = makeClientWith(auth)
+
+    for (let i = 0; i < 6; i++) {
+      await expect(client.get('/test')).rejects.toThrow('refresh token')
+    }
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(client.getCircuitState()).toBe('CLOSED')
   })
 })

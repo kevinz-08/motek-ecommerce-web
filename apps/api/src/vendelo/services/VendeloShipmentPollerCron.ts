@@ -12,6 +12,7 @@ import {
   IShipmentRepository,
   SyncShipmentStatus,
   VendeloOrderNotFoundError,
+  VendeloOrderSnapshot,
   ActiveVendeloOrder,
 } from '@motek/domain'
 import {
@@ -33,10 +34,12 @@ import { VendeloHttpClient } from '../../infrastructure/services/VendeloHttpClie
  * **Estrategia (local-driven):**
  *   1. Consulta nuestra BD por pedidos con `vendeloOrderId` y estado vivo
  *      (`IOrderRepository.findActiveVendeloOrders(batchSize)`).
- *   2. Por cada uno: `GET /v1/admin/orders/{id}` a Vendelo, con delay
- *      entre requests para no saturar.
- *   3. Mapea `VendeloOrderSnapshot.status` → `ShipmentStatus`.
- *   4. Llama al use case `SyncShipmentStatus` (idempotente, atómico).
+ *   2. Los pide a Vendelo en lote (`getOrdersBatch` → `GET /v1/admin/orders`
+ *      con `filter[id][$in]`): ~1 request cada 50 pedidos en vez de 1 por pedido.
+ *   3. Los que no vinieron en el lote (o todos, si el lote falla) se consultan
+ *      uno a uno con `GET /v1/admin/orders/{id}`, con delay entre requests.
+ *   4. Llama al use case `SyncShipmentStatus` (idempotente, atómico) con el
+ *      estado y el detalle de seguimiento (intentos de entrega, estado fino).
  *
  * **Garantías:**
  *   - Circuit breaker del HttpClient: si Vendelo está caído, skip cycle.
@@ -129,15 +132,29 @@ export class VendeloShipmentPollerCron implements OnModuleInit, OnModuleDestroy 
     let skipped = 0
     let errors  = 0
 
+    const fromBatch = await this.fetchBatch(orders)
+    let individualFetches = 0
+
     for (let i = 0; i < orders.length; i++) {
       const order = orders[i]
       try {
-        const snapshot = await this.vendeloPort.getOrder(order.vendeloOrderId)
+        let snapshot = fromBatch.get(order.vendeloOrderId)
+        if (!snapshot) {
+          // Delay entre requests individuales — suaviza la carga sobre Vendelo
+          // y permite que el circuit breaker reaccione antes de seguir saturando.
+          if (individualFetches > 0 && this.requestDelayMs > 0) await this.sleep(this.requestDelayMs)
+          individualFetches++
+          snapshot = await this.vendeloPort.getOrder(order.vendeloOrderId)
+        }
         const result = await syncUseCase.execute({
           orderId: order.orderId,
           vendelo_status: snapshot.status,
           trackingNumber: snapshot.trackingNumber ?? undefined,
           carrier: snapshot.carrier ?? undefined,
+          trackingStatus: snapshot.trackingStatus ?? undefined,
+          deliveryAttempts: snapshot.deliveryAttempts ?? undefined,
+          deliveredAt: snapshot.deliveredAt ?? undefined,
+          trackingUpdatedAt: snapshot.trackingUpdatedAt ?? undefined,
         })
         if (!result.ok) {
           this.logger.warn(
@@ -168,14 +185,30 @@ export class VendeloShipmentPollerCron implements OnModuleInit, OnModuleDestroy 
           errors++
         }
       }
-      // Delay entre requests dentro del mismo tick — suaviza la carga sobre Vendelo
-      // y permite que el circuit breaker reaccione antes de seguir saturando.
-      if (i < orders.length - 1 && this.requestDelayMs > 0) {
-        await this.sleep(this.requestDelayMs)
-      }
     }
 
-    return this.buildResult(cycleIso, orders, applied, skipped, errors, circuitState, cycleStart)
+    return this.buildResult(cycleIso, orders, applied, skipped, errors, circuitState, cycleStart, {
+      fetchedInBatch: fromBatch.size,
+      fetchedIndividually: individualFetches,
+    })
+  }
+
+  /**
+   * Consulta en lote. Nunca lanza: si el lote falla (Vendelo caído, filtro no
+   * soportado en la práctica, etc.) devuelve un mapa vacío y el tick sigue con
+   * el fallback uno a uno — el comportamiento previo al lote.
+   */
+  private async fetchBatch(orders: ActiveVendeloOrder[]): Promise<Map<string, VendeloOrderSnapshot>> {
+    const byId = new Map<string, VendeloOrderSnapshot>()
+    try {
+      const snapshots = await this.vendeloPort.getOrdersBatch(orders.map((o) => o.vendeloOrderId))
+      for (const snapshot of snapshots) byId.set(snapshot.id, snapshot)
+    } catch (e) {
+      this.logger.warn(
+        `[VendeloShipmentPoller] Consulta en lote falló — se consultará uno a uno: ${e instanceof Error ? e.message : e}`,
+      )
+    }
+    return byId
   }
 
   private buildResult(
@@ -186,6 +219,7 @@ export class VendeloShipmentPollerCron implements OnModuleInit, OnModuleDestroy 
     errors: number,
     circuitState: string,
     startMs: number,
+    fetches: { fetchedInBatch: number; fetchedIndividually: number } = { fetchedInBatch: 0, fetchedIndividually: 0 },
   ): TickResult {
     const result: TickResult = {
       cycle,
@@ -195,6 +229,7 @@ export class VendeloShipmentPollerCron implements OnModuleInit, OnModuleDestroy 
       errors,
       circuitState,
       durationMs: Date.now() - startMs,
+      ...fetches,
     }
     // Log estructurado JSON para Cloud Logging — clave "service" facilita filtros y alertas
     this.logger.log(JSON.stringify({ service: 'VendeloShipmentPoller', ...result }))
@@ -214,4 +249,8 @@ export interface TickResult {
   errors: number
   circuitState: string
   durationMs: number
+  /** Pedidos resueltos con la consulta en lote. */
+  fetchedInBatch: number
+  /** Pedidos consultados uno a uno (faltantes del lote o lote fallido). */
+  fetchedIndividually: number
 }

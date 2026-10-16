@@ -5,6 +5,8 @@ import {
   AtomicStatusUpdateResult,
   Shipment,
   ShipmentStatus,
+  ShipmentTrackingDetails,
+  TrackingStatus,
 } from '@motek/domain'
 import { PrismaService } from '../database/prisma.service'
 
@@ -15,6 +17,10 @@ type PrismaShipmentRow = {
   trackingNumber: string | null
   carrier: string | null
   labelUrl: string | null
+  trackingStatus: string | null
+  deliveryAttempts: number | null
+  deliveredAt: Date | null
+  trackingUpdatedAt: Date | null
   createdAt: Date
   updatedAt: Date
 }
@@ -27,6 +33,10 @@ function toDomain(row: PrismaShipmentRow): Shipment {
     trackingNumber: row.trackingNumber,
     carrier: row.carrier,
     labelUrl: row.labelUrl,
+    trackingStatus: row.trackingStatus as TrackingStatus | null,
+    deliveryAttempts: row.deliveryAttempts,
+    deliveredAt: row.deliveredAt,
+    trackingUpdatedAt: row.trackingUpdatedAt,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }
@@ -78,5 +88,15 @@ export class PrismaShipmentRepository implements IShipmentRepository {
       },
     })
     return { applied: result.count > 0 }
+  }
+
+  async updateTrackingDetails(orderId: string, details: ShipmentTrackingDetails): Promise<void> {
+    // Solo los campos definidos — undefined = no tocar (convención de IShipmentRepository)
+    const data = Object.fromEntries(
+      Object.entries(details).filter(([, value]) => value !== undefined),
+    ) as ShipmentTrackingDetails
+    if (Object.keys(data).length === 0) return
+    // updateMany: no-op (sin lanzar) si el envío aún no existe
+    await this.prisma.client.shipment.updateMany({ where: { orderId }, data })
   }
 }

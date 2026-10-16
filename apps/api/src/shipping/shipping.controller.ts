@@ -2,8 +2,8 @@ import { Body, Controller, HttpCode, Inject, Logger, Post } from '@nestjs/common
 import { Throttle } from '@nestjs/throttler'
 import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import { Public } from '../auth/decorators/public.decorator'
-import { QuoteShipping, IProductRepository, IVendeloShippingPort } from '@motek/domain'
-import { PRODUCT_REPOSITORY, VENDELO_SHIPPING_PORT } from '../infrastructure/injection-tokens'
+import { QuoteShipping, IProductRepository, IVendeloShippingPort, ICityCoverageRepository } from '@motek/domain'
+import { CITY_COVERAGE_REPOSITORY, PRODUCT_REPOSITORY, VENDELO_SHIPPING_PORT } from '../infrastructure/injection-tokens'
 import { QuoteShippingDto } from './dto/quote-shipping.dto'
 
 @ApiTags('shipping')
@@ -14,6 +14,7 @@ export class ShippingController {
   constructor(
     @Inject(PRODUCT_REPOSITORY) private readonly productRepo: IProductRepository,
     @Inject(VENDELO_SHIPPING_PORT) private readonly shippingPort: IVendeloShippingPort,
+    @Inject(CITY_COVERAGE_REPOSITORY) private readonly cityCoverage: ICityCoverageRepository,
   ) {}
 
   /**
@@ -31,7 +32,7 @@ export class ShippingController {
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @ApiOperation({ summary: 'Cotiza el costo de envío de un carrito sin crear el pedido' })
   async quote(@Body() dto: QuoteShippingDto) {
-    const useCase = new QuoteShipping(this.productRepo, this.shippingPort)
+    const useCase = new QuoteShipping(this.productRepo, this.shippingPort, this.cityCoverage)
     const result = await useCase.execute({
       shippingCityCode: dto.shippingCityCode,
       shippingSubdivisionCode: dto.shippingSubdivisionCode,

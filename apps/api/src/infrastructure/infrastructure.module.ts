@@ -10,8 +10,12 @@ import {
   PAYMENT_SERVICE,
   SHIPMENT_REPOSITORY,
   VENDELO_SHIPPING_PORT,
+  VENDELO_AUTH_PROVIDER,
+  CITY_COVERAGE_REPOSITORY,
   ALERT_NOTIFICATION_PORT,
 } from './injection-tokens'
+import { PrismaService } from './database/prisma.service'
+import { createVendeloAuthProvider } from './services/VendeloAuthProvider'
 import { PrismaCouponRepository } from './repositories/PrismaCouponRepository'
 import { PrismaProductRepository } from './repositories/PrismaProductRepository'
 import { PrismaStockSyncRepository } from './repositories/PrismaStockSyncRepository'
@@ -20,6 +24,7 @@ import { PrismaProductDescriptionRepository } from './repositories/PrismaProduct
 import { PrismaOrderRepository } from './repositories/PrismaOrderRepository'
 import { PrismaUserRepository } from './repositories/PrismaUserRepository'
 import { PrismaShipmentRepository } from './repositories/PrismaShipmentRepository'
+import { PrismaCityCoverageRepository } from './repositories/PrismaCityCoverageRepository'
 import { WompiService } from './services/WompiService'
 import { MercadoPagoService } from './services/MercadoPagoService'
 import { ResendEmailService } from './services/ResendEmailService'
@@ -45,6 +50,7 @@ import { ExpiredOrdersCleanupService } from './services/ExpiredOrdersCleanupServ
     { provide: USER_REPOSITORY,                useClass: PrismaUserRepository },
     { provide: SHIPMENT_REPOSITORY,            useClass: PrismaShipmentRepository },
     { provide: VENDELO_SHIPPING_PORT,          useClass: VendeloService },
+    { provide: CITY_COVERAGE_REPOSITORY,       useClass: PrismaCityCoverageRepository },
     // PAYMENT_SERVICE token → Wompi (pasarela principal Colombia)
     { provide: PAYMENT_SERVICE,    useClass: WompiService },
     // Servicios concretos también disponibles por clase para inyección directa en controllers
@@ -54,6 +60,12 @@ import { ExpiredOrdersCleanupService } from './services/ExpiredOrdersCleanupServ
     TurnstileService,
     CloudinaryService,
     EmailQueueService,
+    // apikey (heredado) u oauth según VENDELO_AUTH_MODE
+    {
+      provide: VENDELO_AUTH_PROVIDER,
+      inject: [PrismaService],
+      useFactory: (prisma: PrismaService) => createVendeloAuthProvider(prisma.client),
+    },
     VendeloHttpClient,
     VendeloService,
     VendeloOrderQueueService,
@@ -73,6 +85,7 @@ import { ExpiredOrdersCleanupService } from './services/ExpiredOrdersCleanupServ
     USER_REPOSITORY,
     SHIPMENT_REPOSITORY,
     VENDELO_SHIPPING_PORT,
+    CITY_COVERAGE_REPOSITORY,
     PAYMENT_SERVICE,
     ALERT_NOTIFICATION_PORT,
     WompiService,

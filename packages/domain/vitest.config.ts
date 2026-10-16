@@ -4,6 +4,9 @@ import path from 'path'
 export default defineConfig({
   test: {
     globals: true,
+    // Solo las fuentes: `tsc` también compila los tests a dist/, y tras un
+    // build vitest ejecutaba esas copias desactualizadas junto a las reales.
+    include: ['src/**/*.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

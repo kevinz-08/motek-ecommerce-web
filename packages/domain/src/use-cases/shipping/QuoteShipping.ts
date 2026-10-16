@@ -2,6 +2,7 @@ import { Result, ok, err, AppError } from '../../shared/Result'
 import { FREE_SHIPPING_THRESHOLD_CENTS } from '../../shared/constants'
 import { IProductRepository } from '../../repositories/IProductRepository'
 import { IVendeloShippingPort } from '../../repositories/IVendeloShippingPort'
+import { ICityCoverageRepository, shippingSuspendedMessage } from '../../repositories/ICityCoverageRepository'
 import { DeliveryMethod } from '../../entities/Order'
 
 export interface QuoteShippingInput {
@@ -39,6 +40,8 @@ export class QuoteShipping {
   constructor(
     private readonly productRepo: IProductRepository,
     private readonly shippingPort: IVendeloShippingPort,
+    /** Opcional: sin él no se valida si Vendelo suspendió la ciudad de destino. */
+    private readonly cityCoverage?: ICityCoverageRepository,
   ) {}
 
   async execute(input: QuoteShippingInput): Promise<Result<QuoteShippingOutput, AppError>> {
@@ -52,11 +55,25 @@ export class QuoteShipping {
       return err(new AppError('VALIDATION_ERROR', 'Se requiere al menos un ítem para cotizar'))
     }
 
+    // Ciudad suspendida por Vendelo: avisar ya en el carrito/checkout, antes de
+    // que el cliente llegue a pagar (CreateOrder aplica la misma regla).
+    if (this.cityCoverage) {
+      const coverage = await this.cityCoverage.findByCityCode(input.shippingCityCode)
+      if (coverage?.serviceStatus === 'SUSPENDED') {
+        return err(new AppError('VALIDATION_ERROR', shippingSuspendedMessage(coverage.unavailableMessage), {
+          reason: 'SHIPPING_SUSPENDED',
+        }))
+      }
+    }
+
     let cartTotal = 0
 
     const resolvedItems: Array<{
       productId: string
       quantity: number
+      sku: string
+      name: string
+      unitPrice: number
       weightKg: number | null
       heightCm: number | null
       widthCm: number | null
@@ -81,6 +98,9 @@ export class QuoteShipping {
       resolvedItems.push({
         productId: item.productId,
         quantity: item.quantity,
+        sku: product.sku,
+        name: product.name,
+        unitPrice: product.price,
         weightKg: product.weightKg,
         heightCm: product.heightCm,
         widthCm: product.widthCm,

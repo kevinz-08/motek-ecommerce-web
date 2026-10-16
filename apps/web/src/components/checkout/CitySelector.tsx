@@ -7,7 +7,13 @@ export interface CityOption {
   code: string
   name: string
   subdivisionCode: string
+  /** SUSPENDED = Vendelo no está entregando en esa ciudad temporalmente. */
+  serviceStatus?: 'ACTIVE' | 'SUSPENDED'
+  serviceUnavailableMessage?: string | null
 }
+
+const isSuspended = (city: CityOption) => city.serviceStatus === 'SUSPENDED'
+const DEFAULT_SUSPENDED_MESSAGE = 'Por el momento no realizamos entregas en esta ciudad.'
 
 interface CitySelectorProps {
   value: CityOption | null
@@ -57,6 +63,9 @@ export function CitySelector({ value, onChange, required, disabled }: CitySelect
   }, [])
 
   function handleSelect(city: CityOption) {
+    // Ciudad sin cobertura: se muestra en la lista para que el cliente entienda
+    // por qué no puede elegirla, pero no se selecciona.
+    if (isSuspended(city)) return
     onChange(city)
     // Mostramos al usuario el formato "Ciudad, Departamento" para que después
     // de elegir vea claramente cuál era la opción exacta (especialmente útil
@@ -104,7 +113,22 @@ export function CitySelector({ value, onChange, required, disabled }: CitySelect
           {loading && (
             <li className="px-4 py-2.5 text-gray-400">Buscando...</li>
           )}
-          {!loading && results.map((city) => (
+          {!loading && results.map((city) => isSuspended(city) ? (
+            <li
+              key={city.code}
+              role="option"
+              aria-selected={false}
+              aria-disabled="true"
+              className="px-4 py-2 cursor-not-allowed"
+            >
+              <div className="text-gray-400 leading-tight">
+                {normalizeCityName(city.name)}
+              </div>
+              <div className="text-xs text-gray-400 leading-tight">
+                {getDepartmentName(city.subdivisionCode)} · {city.serviceUnavailableMessage?.trim() || DEFAULT_SUSPENDED_MESSAGE}
+              </div>
+            </li>
+          ) : (
             <li
               key={city.code}
               role="option"

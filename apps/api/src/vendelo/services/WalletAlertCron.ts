@@ -39,13 +39,13 @@ export class WalletAlertCron implements OnModuleInit, OnModuleDestroy {
     // se aplique en el próximo deploy sin cambios de código
     const threshold = Number(process.env['VENDELO_WALLET_ALERT_THRESHOLD'] ?? 50_000)
 
+    // La API de Vendelo no devuelve moneda: la billetera siempre está en pesos COP
+    const currency = 'COP'
     let balance: number
-    let currency: string
 
     try {
       const wallet = await this.vendeloService.getWalletBalance()
       balance = wallet.balance
-      currency = wallet.currency
     } catch (e) {
       this.logger.error(`[WalletAlertCron] No se pudo consultar el saldo de la wallet: ${e}`)
       await this.alertPort.sendAlert('CRITICAL', 'No se pudo consultar el saldo de la wallet Vendelo', {

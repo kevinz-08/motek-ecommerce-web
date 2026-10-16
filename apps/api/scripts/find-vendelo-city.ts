@@ -6,10 +6,10 @@
  */
 import dotenv from 'dotenv'
 import path from 'path'
+import { createScriptAuth } from './lib/vendelo-script-auth'
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') })
 
-const API_KEY = process.env['VENDELO_API_KEY']
 const API_URL = process.env['VENDELO_API_URL'] ?? 'https://api.venndelo.com'
 
 async function main() {
@@ -18,10 +18,7 @@ async function main() {
     console.error('Uso: pnpm exec tsx scripts/find-vendelo-city.ts <substring>')
     process.exit(1)
   }
-  if (!API_KEY) {
-    console.error('VENDELO_API_KEY no configurado')
-    process.exit(1)
-  }
+  const auth = await createScriptAuth()
 
   const regex = new RegExp(needle, 'i')
   let pageToken = ''
@@ -32,7 +29,7 @@ async function main() {
     const qs = new URLSearchParams({ page_size: '500' })
     if (pageToken) qs.set('page_token', pageToken)
     const res = await fetch(`${API_URL}/v1/admin/region/cities?${qs}`, {
-      headers: { 'X-Venndelo-Api-Key': API_KEY },
+      headers: await auth.getHeaders(),
     })
     if (!res.ok) {
       console.error(`HTTP ${res.status}: ${await res.text()}`)
@@ -53,6 +50,7 @@ async function main() {
   } while (pageToken)
 
   console.log(`\nEscaneadas ${scanned} ciudades, ${matches} coincidencias.`)
+  await auth.close()
 }
 
 main().catch((e) => { console.error(e); process.exit(1) })

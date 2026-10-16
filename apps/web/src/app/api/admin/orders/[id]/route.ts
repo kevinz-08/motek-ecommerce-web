@@ -30,7 +30,12 @@ export async function GET(
         include: { product: { select: { sku: true, name: true } } },
       },
       payment: true,
-      shipment: { select: { status: true, trackingNumber: true, carrier: true, updatedAt: true } },
+      shipment: {
+        select: {
+          status: true, trackingNumber: true, carrier: true, updatedAt: true,
+          trackingStatus: true, deliveryAttempts: true, deliveredAt: true,
+        },
+      },
       // Null en pedidos de invitado: el email de contacto sale de contactEmail,
       // y el nombre, del GuestCustomer.
       user: { select: { email: true, name: true } },

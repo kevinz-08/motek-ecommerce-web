@@ -11,6 +11,7 @@ import {
   LabelFormat,
   LabelOutput,
 } from '../../infrastructure/services/VendeloService'
+import type { ApiPickup } from '../../infrastructure/services/vendelo-api.types'
 import { ORDER_REPOSITORY, VENDELO_SHIPPING_PORT } from '../../infrastructure/injection-tokens'
 
 /**
@@ -41,6 +42,8 @@ export class ShippingAdminService {
     format: LabelFormat,
     output: LabelOutput = 'URL',
   ): Promise<GenerateLabelsResponse & { skipped: string[] }> {
+    // `status` distingue etiquetas listas (SUCCESS) de generación en curso
+    // (PROCESSING) o fallida (ERROR) — ver VendeloService.generateLabels.
     const rows = await this.orderRepo.findVendeloOrderIdsBatch(orderIds)
 
     const vendeloIds: string[] = []
@@ -78,7 +81,7 @@ export class ShippingAdminService {
    */
   async requestPickup(
     orderIds: string[],
-  ): Promise<{ pickups: unknown[]; skipped: string[] }> {
+  ): Promise<{ pickups: ApiPickup[]; skipped: string[] }> {
     const rows = await this.orderRepo.findVendeloOrderIdsBatch(orderIds)
 
     const vendeloIds: string[] = []

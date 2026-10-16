@@ -48,6 +48,9 @@ interface OrderDetails {
     trackingNumber: string | null
     carrier: string | null
     updatedAt: string
+    trackingStatus: string | null
+    deliveryAttempts: number | null
+    deliveredAt: string | null
   } | null
 }
 
@@ -164,6 +167,13 @@ export function OrderInfoModal({ orderId }: { orderId: string }) {
               {data.shippingAddress.notes && <KV label="Notas" value={data.shippingAddress.notes} />}
               {data.shipment?.trackingNumber && <KV label="Tracking" value={data.shipment.trackingNumber} mono />}
               {data.shipment?.carrier && <KV label="Transportador" value={data.shipment.carrier} />}
+              {data.shipment?.trackingStatus && <KV label="Estado transportadora" value={data.shipment.trackingStatus} mono />}
+              {(data.shipment?.deliveryAttempts ?? 0) > 0 && (
+                <KV label="Intentos de entrega" value={String(data.shipment?.deliveryAttempts)} />
+              )}
+              {data.shipment?.deliveredAt && (
+                <KV label="Entregado" value={new Date(data.shipment.deliveredAt).toLocaleString('es-CO')} />
+              )}
               {data.vendeloOrderId && <KV label="ID Vendelo" value={data.vendeloOrderId} mono />}
             </Section>
 

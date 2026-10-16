@@ -7,52 +7,22 @@ import {
   SyncShipmentStatus,
   IOrderRepository,
   IShipmentRepository,
-  ShipmentStatus,
 } from '@motek/domain'
 import { Public } from '../auth/decorators/public.decorator'
 import { ORDER_REPOSITORY, SHIPMENT_REPOSITORY } from '../infrastructure/injection-tokens'
 import { VendeloWebhookGuard } from './guards/vendelo-webhook.guard'
-
-/** Eventos del Chatbot Connection de Vendelo que impactan el estado del envío. */
-type VendeloWebhookEvent =
-  | 'ORDER_CREATED'
-  | 'ORDER_CANCELLED'
-  | 'ORDER_CONFIRMATION_REQUESTED'
-  | 'ORDER_PREPARED'
-  | 'ORDER_READY_FOR_PICKUP'
-  | 'ORDER_SHIPPED'
-  | 'ORDER_DELIVERED'
-  | 'SHIPMENT_EXCEPTION_CREATED'
-  | 'SHIPMENT_STATUS_UPDATED'
-
-interface VendeloWebhookPayload {
-  event?: VendeloWebhookEvent
-  data?: {
-    order_id?: string
-    external_order_id?: string
-    status?: string
-    shipments?: Array<{
-      tracking_number?: string
-      carrier?: string
-      status?: string
-    }>
-  }
-}
-
-/** Mapa de evento Vendelo → ShipmentStatus de dominio */
-const EVENT_TO_STATUS: Partial<Record<VendeloWebhookEvent, ShipmentStatus>> = {
-  ORDER_PREPARED:          'PREPARING',
-  ORDER_READY_FOR_PICKUP:  'READY',
-  ORDER_SHIPPED:           'SHIPPED',
-  ORDER_DELIVERED:         'DELIVERED',
-  ORDER_CANCELLED:         'CANCELLED',
-  SHIPMENT_EXCEPTION_CREATED: 'INCIDENT',
-}
+import { describeShape, parseVendeloWebhook } from './webhook/vendelo-webhook-payload'
 
 @ApiTags('vendelo / webhooks')
 @Controller('vendelo')
 export class VendeloWebhookController {
   private readonly logger = new Logger(VendeloWebhookController.name)
+  /**
+   * Eventos cuya estructura ya se registró en logs en esta instancia. El
+   * contrato del sobre del webhook no está documentado por Venndelo: el primer
+   * evento de cada tipo deja su forma (sin valores) para poder fijarlo.
+   */
+  private readonly shapesLogged = new Set<string>()
 
   constructor(
     @Inject(ORDER_REPOSITORY)    private readonly orderRepo: IOrderRepository,
@@ -61,9 +31,12 @@ export class VendeloWebhookController {
 
   /**
    * Recibe eventos del Chatbot Connection de Vendelo.
-   * - Seguridad: VendeloWebhookGuard verifica HMAC-SHA256 antes de llegar aquí.
+   * - Seguridad: VendeloWebhookGuard valida el secreto compartido en `metadata`.
    * - Siempre responde 200 para evitar reintentos masivos de Vendelo.
-   * - SyncShipmentStatus garantiza idempotencia con atomic WHERE.
+   * - El payload se normaliza con `parseVendeloWebhook` (tolerante a variantes
+   *   de forma — ver ese módulo).
+   * - SyncShipmentStatus garantiza idempotencia con atomic WHERE y nunca
+   *   retrocede el estado, así que eventos duplicados o desordenados son inocuos.
    */
   @Post('webhook')
   @Public()
@@ -71,53 +44,90 @@ export class VendeloWebhookController {
   @HttpCode(200)
   @UseGuards(VendeloWebhookGuard)
   @ApiOperation({ summary: 'Webhook del Chatbot Connection de Vendelo (eventos de envío)' })
-  async webhook(@Body() payload: VendeloWebhookPayload) {
-    const event = payload.event
-    if (!event) {
+  async webhook(@Body() payload: unknown) {
+    const parsed = parseVendeloWebhook(payload)
+
+    this.logShapeOnce(parsed.rawEvent ?? '(sin evento)', payload)
+
+    if (!parsed.rawEvent) {
+      this.logger.warn(`[VendeloWebhook] Payload sin evento — shape=${describeShape(payload).join(' ')}`)
       return { received: true, processed: false, reason: 'missing_event' }
     }
+    if (!parsed.event) {
+      this.logger.warn(`[VendeloWebhook] Evento desconocido "${parsed.rawEvent}" — se ignora`)
+      return { received: true, processed: false, reason: 'unknown_event' }
+    }
 
-    const targetStatus = EVENT_TO_STATUS[event]
-    if (!targetStatus) {
-      // Evento conocido pero sin impacto en estado (ej. ORDER_CREATED, ORDER_CONFIRMATION_REQUESTED)
+    const hasTrackingDetails = Boolean(
+      parsed.trackingNumber || parsed.trackingStatus || parsed.deliveryAttempts !== null,
+    )
+    if (!parsed.targetStatus && !hasTrackingDetails) {
+      // Evento conocido sin impacto en el envío (ej. ORDER_CREATED, ORDER_CONFIRMATION_REQUESTED)
       return { received: true, processed: false, reason: 'event_not_tracked' }
     }
 
-    const orderId = payload.data?.external_order_id
+    const orderId = parsed.externalOrderId
+      ?? (parsed.vendeloOrderId ? await this.orderRepo.findIdByVendeloOrderId(parsed.vendeloOrderId) : null)
     if (!orderId) {
-      this.logger.warn(`[VendeloWebhook] Evento ${event} sin external_order_id`)
+      this.logger.warn(
+        `[VendeloWebhook] Evento ${parsed.event} sin pedido resoluble — shape=${describeShape(payload).join(' ')}`,
+      )
       return { received: true, processed: false, reason: 'missing_order_id' }
     }
 
-    const shipment = payload.data?.shipments?.[0]
+    // Sin estado nuevo (ej. SHIPMENT_STATUS_UPDATED con devolución en curso):
+    // se reafirma el estado actual para registrar solo el detalle de seguimiento.
+    const currentStatus = parsed.targetStatus
+      ?? (await this.shipmentRepo.findByOrderId(orderId))?.status
+    if (!currentStatus) {
+      return { received: true, processed: false, reason: 'no_status_change' }
+    }
 
-    const useCase = new SyncShipmentStatus(this.shipmentRepo, this.orderRepo)
-    const result = await useCase.execute({
+    const result = await new SyncShipmentStatus(this.shipmentRepo, this.orderRepo).execute({
       orderId,
-      vendelo_status: targetStatus,
-      trackingNumber: shipment?.tracking_number,
-      carrier: shipment?.carrier,
+      vendelo_status: currentStatus,
+      trackingNumber: parsed.trackingNumber ?? undefined,
+      carrier: parsed.carrier ?? undefined,
+      trackingStatus: parsed.trackingStatus ?? undefined,
+      deliveryAttempts: parsed.deliveryAttempts ?? undefined,
+      deliveredAt: parsed.deliveredAt ?? undefined,
+      trackingUpdatedAt: parsed.trackingUpdatedAt ?? undefined,
     })
 
     if (!result.ok) {
       this.logger.error(
-        `[VendeloWebhook] SyncShipmentStatus error orderId=${orderId} event=${event}: ${result.error.code}`,
+        `[VendeloWebhook] SyncShipmentStatus error orderId=${orderId} event=${parsed.event}: ${result.error.code}`,
       )
       return { received: true, processed: false, error: result.error.code }
     }
 
+    const changed = result.value.updated || result.value.detailsUpdated
+
     // userId null = pedido de invitado: no hay historial cacheado por usuario que
     // invalidar (el comprador consulta por trackingToken, sin caché de sesión).
-    if (result.value.updated && result.value.userId) {
+    if (changed && result.value.userId) {
       this.revalidateOrdersCache(result.value.userId).catch((e) =>
         this.logger.warn(`[VendeloWebhook] No se pudo invalidar caché de pedidos: ${e}`),
       )
     }
 
     this.logger.log(
-      `[VendeloWebhook] orderId=${orderId} userId=${result.value.userId ?? 'guest'} event=${event} updated=${result.value.updated} status=${result.value.newStatus}`,
+      `[VendeloWebhook] orderId=${orderId} userId=${result.value.userId ?? 'guest'} event=${parsed.event} `
+      + `updated=${result.value.updated} detailsUpdated=${result.value.detailsUpdated} status=${result.value.newStatus}`,
     )
-    return { received: true, processed: true, updated: result.value.updated }
+    return {
+      received: true,
+      processed: true,
+      updated: result.value.updated,
+      detailsUpdated: result.value.detailsUpdated,
+    }
+  }
+
+  /** Registra la estructura (sin valores) del primer evento de cada tipo. */
+  private logShapeOnce(eventKey: string, payload: unknown): void {
+    if (this.shapesLogged.has(eventKey)) return
+    this.shapesLogged.add(eventKey)
+    this.logger.log(`[VendeloWebhook] Estructura del evento ${eventKey}: ${describeShape(payload).join(' ')}`)
   }
 
   /**

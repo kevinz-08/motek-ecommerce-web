@@ -22,6 +22,7 @@ export * from './entities/ShipmentException'
 export * from './entities/User'
 
 // ── Interfaces de repositorio ────────────────────────────────────────────────
+export * from './repositories/ICityCoverageRepository'
 export * from './repositories/ICouponRepository'
 export * from './repositories/IInventorySyncRepository'
 export * from './repositories/IOrderRepository'
@@ -39,9 +40,11 @@ export * from './services/IRecipientTrustStrategy'
 // ── Shared ───────────────────────────────────────────────────────────────────
 export * from './shared/Result'
 export * from './shared/constants'
+export * from './shared/colombia-divipola'
 
 // ── Use cases ────────────────────────────────────────────────────────────────
 export * from './use-cases/coupons/ValidateCoupon'
+export * from './use-cases/orders/CancelOrder'
 export * from './use-cases/orders/ClaimGuestOrders'
 export * from './use-cases/orders/ConfirmPayment'
 export * from './use-cases/orders/CreateOrder'

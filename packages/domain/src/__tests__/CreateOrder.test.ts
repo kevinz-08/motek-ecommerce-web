@@ -760,4 +760,78 @@ describe('CreateOrder', () => {
       expect(create).not.toHaveBeenCalled()
     })
   })
+
+  describe('cobertura de envío (ciudad suspendida por Vendelo)', () => {
+    function makeDeps() {
+      const product = makeProduct()
+      const productRepo = { findById: vi.fn().mockResolvedValue(product) } as unknown as IProductRepository
+      const orderRepo = { create: vi.fn().mockResolvedValue(makeOrder()) } as unknown as IOrderRepository
+      const paymentService = {
+        createTransaction: vi.fn().mockResolvedValue({
+          externalId: null, reference: 'ref', integritySignature: 'sig', publicKey: 'pk', amountInCents: 1, currency: 'COP',
+        }),
+      } as unknown as IPaymentService
+      return { productRepo, orderRepo, paymentService }
+    }
+
+    const baseInput = {
+      customer: { kind: 'user' as const, userId: 'user-1', email: 'cliente@motek.test' },
+      items: [{ productId: 'prod-1', quantity: 1 }],
+      shippingAddress: SHIPPING,
+      buyer: { idType: 'CC' as const, idNumber: '1000123456' },
+      paymentProvider: 'WOMPI' as const,
+    }
+
+    it('rechaza el pedido sin crearlo si la ciudad de destino está SUSPENDED', async () => {
+      const { productRepo, orderRepo, paymentService } = makeDeps()
+      const cityCoverage = {
+        findByCityCode: vi.fn().mockResolvedValue({ serviceStatus: 'SUSPENDED', unavailableMessage: 'Sin cobertura temporal' }),
+      }
+
+      const result = await new CreateOrder(orderRepo, productRepo, paymentService, undefined, undefined, cityCoverage)
+        .execute(baseInput)
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error.code).toBe('VALIDATION_ERROR')
+        expect(result.error.message).toBe('Sin cobertura temporal')
+      }
+      expect(cityCoverage.findByCityCode).toHaveBeenCalledWith('11001000')
+      expect(orderRepo.create).not.toHaveBeenCalled()
+      expect(paymentService.createTransaction).not.toHaveBeenCalled()
+    })
+
+    it('usa un mensaje por defecto si Vendelo no envió uno', async () => {
+      const { productRepo, orderRepo, paymentService } = makeDeps()
+      const cityCoverage = { findByCityCode: vi.fn().mockResolvedValue({ serviceStatus: 'SUSPENDED', unavailableMessage: null }) }
+
+      const result = await new CreateOrder(orderRepo, productRepo, paymentService, undefined, undefined, cityCoverage)
+        .execute(baseInput)
+
+      expect(!result.ok && result.error.message).toBe('Por el momento no realizamos entregas en esta ciudad.')
+    })
+
+    it('ciudad ACTIVE o ausente del catálogo local → no bloquea', async () => {
+      for (const coverage of [{ serviceStatus: 'ACTIVE', unavailableMessage: null }, null]) {
+        const { productRepo, orderRepo, paymentService } = makeDeps()
+        const cityCoverage = { findByCityCode: vi.fn().mockResolvedValue(coverage) }
+
+        const result = await new CreateOrder(orderRepo, productRepo, paymentService, undefined, undefined, cityCoverage)
+          .execute(baseInput)
+
+        expect(result.ok).toBe(true)
+      }
+    })
+
+    it('retiro en tienda no consulta cobertura (no hay envío)', async () => {
+      const { productRepo, orderRepo, paymentService } = makeDeps()
+      const cityCoverage = { findByCityCode: vi.fn() }
+
+      const result = await new CreateOrder(orderRepo, productRepo, paymentService, undefined, undefined, cityCoverage)
+        .execute({ ...baseInput, deliveryMethod: 'STORE_PICKUP' })
+
+      expect(result.ok).toBe(true)
+      expect(cityCoverage.findByCityCode).not.toHaveBeenCalled()
+    })
+  })
 })

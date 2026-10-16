@@ -56,7 +56,10 @@ describe('QuoteShipping', () => {
     expect(shippingPort.quoteOrder).toHaveBeenCalledWith({
       shippingCityCode: '11001000',
       shippingSubdivisionCode: '11',
-      items: [{ productId: 'prod-1', quantity: 1, weightKg: null, heightCm: null, widthCm: null, lengthCm: null }],
+      items: [{
+        productId: 'prod-1', quantity: 1, sku: 'BAT-12V', name: 'Batería 12V', unitPrice: 5000000,
+        weightKg: null, heightCm: null, widthCm: null, lengthCm: null,
+      }],
       paymentMethod: 'EXTERNAL_PAYMENT',
     })
   })
@@ -72,7 +75,7 @@ describe('QuoteShipping', () => {
 
     expect(shippingPort.quoteOrder).toHaveBeenCalledWith(
       expect.objectContaining({
-        items: [{ productId: 'prod-1', quantity: 1, weightKg: 3.2, heightCm: 20, widthCm: 15, lengthCm: 30 }],
+        items: [expect.objectContaining({ productId: 'prod-1', quantity: 1, weightKg: 3.2, heightCm: 20, widthCm: 15, lengthCm: 30 })],
       }),
     )
   })
@@ -191,5 +194,36 @@ describe('QuoteShipping', () => {
     }
     expect(productRepo.findById).not.toHaveBeenCalled()
     expect(shippingPort.quoteOrder).not.toHaveBeenCalled()
+  })
+
+  describe('ciudad suspendida por Vendelo', () => {
+    it('retorna VALIDATION_ERROR con el mensaje de Vendelo y no cotiza', async () => {
+      const productRepo = { findById: vi.fn().mockResolvedValue(makeProduct()) } as unknown as IProductRepository
+      const shippingPort = { quoteOrder: vi.fn() } as unknown as IVendeloShippingPort
+      const cityCoverage = {
+        findByCityCode: vi.fn().mockResolvedValue({ serviceStatus: 'SUSPENDED', unavailableMessage: 'Sin cobertura' }),
+      }
+
+      const result = await new QuoteShipping(productRepo, shippingPort, cityCoverage).execute(BASE_INPUT)
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) {
+        expect(result.error.code).toBe('VALIDATION_ERROR')
+        expect(result.error.message).toBe('Sin cobertura')
+      }
+      expect(shippingPort.quoteOrder).not.toHaveBeenCalled()
+    })
+
+    it('ciudad activa cotiza normalmente', async () => {
+      const productRepo = { findById: vi.fn().mockResolvedValue(makeProduct()) } as unknown as IProductRepository
+      const shippingPort = {
+        quoteOrder: vi.fn().mockResolvedValue({ quotedShippingTotal: 900000, assumedShippingTotal: 0 }),
+      } as unknown as IVendeloShippingPort
+      const cityCoverage = { findByCityCode: vi.fn().mockResolvedValue({ serviceStatus: 'ACTIVE', unavailableMessage: null }) }
+
+      const result = await new QuoteShipping(productRepo, shippingPort, cityCoverage).execute(BASE_INPUT)
+
+      expect(result.ok).toBe(true)
+    })
   })
 })

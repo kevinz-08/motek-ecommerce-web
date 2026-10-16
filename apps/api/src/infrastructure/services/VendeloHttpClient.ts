@@ -1,10 +1,15 @@
-import { Injectable, Logger } from '@nestjs/common'
+import { Inject, Injectable, Logger, Optional } from '@nestjs/common'
+import { VENDELO_AUTH_PROVIDER } from '../injection-tokens'
+import { ApiKeyAuthProvider, type IVendeloAuthProvider } from './VendeloAuthProvider'
+import { getVendeloApiUrl } from './vendelo-config'
 
 interface RequestOptions {
   method: string
   path: string
   body?: unknown
   attempt?: number
+  /** true si ya se reintentó tras un 401 con un token nuevo — evita loops. */
+  authRetried?: boolean
   /**
    * false para endpoints no idempotentes (ej. creación de orden): en un 5xx no
    * sabemos si Vendelo ya procesó la request, así que reintentar puede crear
@@ -46,14 +51,12 @@ type CircuitState = 'CLOSED' | 'OPEN' | 'HALF_OPEN'
 const FAILURE_THRESHOLD = 5
 const RESET_TIMEOUT_MS  = 60_000 // 1 minuto
 
-const VENDELO_AUTH_HEADER = 'X-Venndelo-Api-Key'
-
 // ── Client ───────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class VendeloHttpClient {
   private readonly logger = new Logger(VendeloHttpClient.name)
-  private readonly apiKey: string
+  private readonly auth: IVendeloAuthProvider
   private readonly baseUrl: string
 
   // Circuit Breaker state (instancia única por proceso — compartida entre requests)
@@ -61,9 +64,18 @@ export class VendeloHttpClient {
   private consecutiveFailures = 0
   private circuitOpenedAt?: number
 
-  constructor() {
-    this.apiKey = process.env['VENDELO_API_KEY'] ?? ''
-    this.baseUrl = (process.env['VENDELO_API_URL'] ?? 'https://api.vendelo.co').replace(/\/$/, '')
+  /**
+   * Sin proveedor inyectado (tests, scripts) cae a la API Key de la env var —
+   * el comportamiento previo a OAuth.
+   */
+  constructor(@Optional() @Inject(VENDELO_AUTH_PROVIDER) auth?: IVendeloAuthProvider) {
+    this.auth = auth ?? new ApiKeyAuthProvider(process.env['VENDELO_API_KEY'] ?? '')
+    this.baseUrl = getVendeloApiUrl()
+  }
+
+  /** Modo de autenticación activo — expuesto para el health check admin. */
+  getAuthMode(): IVendeloAuthProvider['mode'] {
+    return this.auth.mode
   }
 
   async get<T>(path: string): Promise<T> {
@@ -127,8 +139,13 @@ export class VendeloHttpClient {
 
   // ── HTTP request con retry ────────────────────────────────────────────────
 
-  private async request<T>({ method, path, body, attempt = 1, retryOn5xx = true }: RequestOptions): Promise<T> {
+  private async request<T>(opts: RequestOptions): Promise<T> {
+    const { method, path, body, attempt = 1, retryOn5xx = true, authRetried = false } = opts
     this.checkCircuit()
+
+    // Fuera del try: un fallo obteniendo el token (VendeloAuthError) no es un
+    // error de red de Vendelo — no se reintenta aquí ni cuenta para el breaker.
+    const authHeaders = await this.auth.getAuthHeaders()
 
     const controller = new AbortController()
     const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS)
@@ -138,7 +155,7 @@ export class VendeloHttpClient {
       const res = await fetch(`${this.baseUrl}${path}`, {
         method,
         headers: {
-          [VENDELO_AUTH_HEADER]: this.apiKey,
+          ...authHeaders,
           'Content-Type': 'application/json',
           Accept: 'application/json',
         },
@@ -149,11 +166,19 @@ export class VendeloHttpClient {
       const latency = Date.now() - start
       this.logger.log(`${method} ${path} → ${res.status} (${latency}ms)`)
 
+      // Token rechazado antes de su vencimiento (revocado/rotado): refrescar y
+      // reintentar una sola vez. Con API Key no hay nada que refrescar.
+      if (res.status === 401 && this.auth.mode === 'oauth' && !authRetried) {
+        this.logger.warn(`Vendelo 401 en ${method} ${path} — refrescando token y reintentando`)
+        this.auth.invalidate()
+        return this.request<T>({ ...opts, authRetried: true })
+      }
+
       if (isRetryableStatus(res.status, retryOn5xx) && attempt < MAX_ATTEMPTS) {
         const delay = RETRY_DELAYS_MS[attempt - 1] ?? 4_000
         this.logger.warn(`Vendelo ${res.status} — reintentando en ${delay}ms (intento ${attempt}/${MAX_ATTEMPTS - 1})`)
         await this.sleep(delay)
-        return this.request<T>({ method, path, body, attempt: attempt + 1, retryOn5xx })
+        return this.request<T>({ ...opts, attempt: attempt + 1 })
       }
 
       if (!res.ok) {
@@ -179,7 +204,7 @@ export class VendeloHttpClient {
           `Vendelo error de red (${err instanceof Error ? err.name : 'unknown'}) — reintentando en ${delay}ms (intento ${attempt}/${MAX_ATTEMPTS - 1})`,
         )
         await this.sleep(delay)
-        return this.request<T>({ method, path, body, attempt: attempt + 1, retryOn5xx })
+        return this.request<T>({ ...opts, attempt: attempt + 1 })
       }
 
       if (isRetryableError(err)) {

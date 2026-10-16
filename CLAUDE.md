@@ -90,6 +90,8 @@ apps/web               Next.js 16 — SSR reads Prisma directly; mutations go th
 | Sitemap (dynamic) | `apps/web/src/app/sitemap.ts` |
 | Sentry config (web) | `apps/web/sentry.{client,server,edge}.config.ts` |
 | Sentry init (API) | `apps/api/src/instrument.ts` |
+| Vendelo HTTP client + auth | `apps/api/src/infrastructure/services/VendeloHttpClient.ts`, `VendeloOAuthTokenProvider.ts` |
+| Vendelo API contract (types) | `apps/api/src/infrastructure/services/vendelo-api.types.ts` |
 
 ## Domain Layer Patterns
 
@@ -143,6 +145,31 @@ All prices are integers (centavos COP). **Never** use floats for money.
 // Store
 Math.round(parseFloat(input) * 100)
 ```
+
+## Vendelo (Venndelo) Auth
+
+Contrato de la API en `API_VENDELO_DOCUMENTACION.md`; tipos HTTP en
+`apps/api/src/infrastructure/services/vendelo-api.types.ts` (snake_case, montos en **pesos**;
+la conversión ↔ centavos vive solo en `VendeloService`).
+
+- `VENDELO_AUTH_MODE=apikey|oauth` (default `apikey`). La API Key (`X-Venndelo-Api-Key`) está
+  deprecada por Venndelo; OAuth es el destino.
+- En OAuth el **refresh token rota**: vive cifrado (AES-256-GCM, `VENDELO_TOKEN_ENCRYPTION_KEY`)
+  en la tabla `VendeloCredential`, no en una env var. `VendeloOAuthTokenProvider` coordina las
+  instancias de Cloud Run con un lease + compare-and-swap sobre `version`.
+- **Nunca** llamar a `/v1/admin/oauth/token` por fuera del proveedor (scripts incluidos: usan
+  `scripts/lib/vendelo-script-auth.ts`) — un refresco paralelo rota el token y deja a la API
+  con uno revocado.
+- Refresh token nuevo de soporte → `scripts/seed-vendelo-refresh-token.ts` (`VENDELO_REFRESH_TOKEN`
+  solo se lee si la tabla está vacía).
+- **Anular pedidos = use case `CancelOrder`**, nunca `updateStatus('CANCELLED')` directo: si el
+  pedido ya está en Vendelo lo anula allá primero; rechaza envíos ya despachados. La ruta admin
+  `apps/web/src/app/api/orders/[id]/status` delega en NestJS por esto. La cola omite pedidos `CANCELLED`.
+- **Webhook**: el sobre no está documentado por Venndelo → `vendelo/webhook/vendelo-webhook-payload.ts`
+  lo normaliza de forma tolerante y loguea la estructura (sin valores) del primer evento de cada tipo.
+  El polling (`VendeloShipmentPollerCron`) consulta en lote con `filter[id][$in]` y es la red de seguridad.
+- Ciudades `SUSPENDED` (catálogo `VendeloCity`) se rechazan en el dominio (`CreateOrder`, `QuoteShipping`).
+- Guía de activación de credenciales: `docs/vendelo-activacion.md`.
 
 ## Guest Checkout
 

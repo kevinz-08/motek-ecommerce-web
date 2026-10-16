@@ -20,6 +20,8 @@ vi.mock('@motek/domain', async (importOriginal) => {
     IPaymentService: undefined,
     IVendeloShippingPort: undefined,
     ICouponRepository: undefined,
+    IShipmentRepository: undefined,
+    ICityCoverageRepository: undefined,
     OrderStatus: undefined,
     // Usar function() (no arrow) para que sea compatible con `new CreateOrder(...)`
     CreateOrder: vi.fn().mockImplementation(function () {
@@ -49,6 +51,8 @@ import {
   PAYMENT_SERVICE,
   VENDELO_SHIPPING_PORT,
   COUPON_REPOSITORY,
+  SHIPMENT_REPOSITORY,
+  CITY_COVERAGE_REPOSITORY,
 } from '../infrastructure/injection-tokens'
 import type { JwtUser } from '../auth/decorators/current-user.decorator'
 
@@ -86,6 +90,14 @@ const mockOrderRepo = {
   transitionFromPending: vi.fn(),
   decrementStock: vi.fn(),
   count: vi.fn(),
+  findVendeloOrderIdsBatch: vi.fn(),
+  restockItems: vi.fn().mockResolvedValue(undefined),
+}
+const mockShipmentRepo = {
+  findByOrderId: vi.fn(),
+  upsert: vi.fn().mockResolvedValue(undefined),
+  atomicUpdateStatus: vi.fn().mockResolvedValue({ applied: true }),
+  updateTrackingDetails: vi.fn().mockResolvedValue(undefined),
 }
 const mockProductRepo = { findById: vi.fn(), save: vi.fn(), findAll: vi.fn() }
 const mockWompiService = { initiate: vi.fn(), validateWebhook: vi.fn() }
@@ -100,7 +112,7 @@ const mockPrismaClient = {
 const mockMercadoPagoService = { initiate: vi.fn() }
 const mockEmailQueue = { enqueue: vi.fn().mockResolvedValue(undefined) }
 const mockVendeloOrderQueue = { enqueue: vi.fn().mockResolvedValue(undefined) }
-const mockShippingPort = { quoteOrder: vi.fn(), createShipments: vi.fn() }
+const mockShippingPort = { quoteOrder: vi.fn(), createShipments: vi.fn(), cancelOrder: vi.fn() }
 const mockCouponRepo = { findByCode: vi.fn(), findAll: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() }
 
 const mockUser: JwtUser = { id: 'user-1', email: 'user@test.com', role: 'CUSTOMER' }
@@ -116,6 +128,8 @@ async function buildController() {
       { provide: PAYMENT_SERVICE, useValue: mockWompiService },
       { provide: VENDELO_SHIPPING_PORT, useValue: mockShippingPort },
       { provide: COUPON_REPOSITORY, useValue: mockCouponRepo },
+      { provide: SHIPMENT_REPOSITORY, useValue: mockShipmentRepo },
+      { provide: CITY_COVERAGE_REPOSITORY, useValue: { findByCityCode: vi.fn().mockResolvedValue(null) } },
       { provide: WompiService, useValue: mockWompiService },
       { provide: MercadoPagoService, useValue: mockMercadoPagoService },
       { provide: ResendEmailService, useValue: mockEmailService },
@@ -327,6 +341,30 @@ describe('OrdersController', () => {
 
       expect(mockOrderRepo.updateStatus).toHaveBeenCalledWith('order-abc123', 'SHIPPED')
       expect(result).toEqual({ success: true, status: 'SHIPPED' })
+    })
+
+    it('CANCELLED de un pedido ya en Vendelo: lo anula en Vendelo y luego localmente', async () => {
+      mockOrderRepo.findById.mockResolvedValue({ ...mockOrder, status: 'PAID' })
+      mockOrderRepo.findVendeloOrderIdsBatch.mockResolvedValue([{ id: 'order-abc123', vendeloOrderId: 'v-99' }])
+      mockShipmentRepo.findByOrderId.mockResolvedValue(null)
+      mockShippingPort.cancelOrder.mockResolvedValue({ message: 'ok' })
+
+      const result = await controller.updateStatus('order-abc123', { status: 'CANCELLED' })
+
+      expect(mockShippingPort.cancelOrder).toHaveBeenCalledWith('v-99')
+      expect(mockOrderRepo.updateStatus).toHaveBeenCalledWith('order-abc123', 'CANCELLED')
+      expect(result).toMatchObject({ success: true, status: 'CANCELLED', cancelledInVendelo: true })
+    })
+
+    it('CANCELLED rechazado por Vendelo: propaga el error y no cambia el estado local', async () => {
+      mockOrderRepo.findById.mockResolvedValue({ ...mockOrder, status: 'PAID' })
+      mockOrderRepo.findVendeloOrderIdsBatch.mockResolvedValue([{ id: 'order-abc123', vendeloOrderId: 'v-99' }])
+      mockShipmentRepo.findByOrderId.mockResolvedValue(null)
+      mockShippingPort.cancelOrder.mockRejectedValue(new Error('Vendelo API 422: no cancelable'))
+
+      await expect(controller.updateStatus('order-abc123', { status: 'CANCELLED' }))
+        .rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
+      expect(mockOrderRepo.updateStatus).not.toHaveBeenCalled()
     })
   })
 })

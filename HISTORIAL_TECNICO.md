@@ -615,3 +615,126 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Archivos no versionados (`.gitignore`), no requiere commit.
 
 **Verificación:** No aplica activación en runtime — cambio de valores en bloque comentado, sandbox sigue siendo el activo en local. Falta activar el bloque prod (y todas las demás variables de entorno productivas listadas abajo) al momento real del despliegue.
+
+---
+
+## 2026-09-29 — Corregir dirección del emisor en el recibo PDF
+
+**Problema/Motivo:** El recibo PDF mostraba `Carrera 21 #21-58` como dirección de la tienda, distinta de la dirección real usada en contacto (`apps/web/src/lib/contact.ts`) y en la recogida de Vendelo (`Boulevard Santander #23-31`).
+
+**Cambios:**
+
+- `apps/web/src/lib/receipt/ReceiptPdf.tsx` — `ISSUER.address` pasa a `Boulevard Santander #23-31, Bucaramanga, Santander`.
+- Preparación del despliegue a Cloud Run (fuera del repo, no versionado): se generaron `C:\deploy\api.env.production` (secretos para Secret Manager), `C:\deploy\api.env.yaml` (variables no secretas de la API) y `C:\deploy\web.env.production` (variables para Vercel) con llaves Wompi de producción, `JWT_SECRET` / `INTERNAL_API_SECRET` / `AUTH_SECRET` nuevos y datos de recogida Vendelo (`VENDELO_STORE_CITY_CODE=68001000`, `VENDELO_STORE_SUBDIVISION_CODE=68`). Los `.env` locales no se modificaron.
+
+**Verificación:** Cambio de una constante de texto; sin impacto en tipos. El script de generación validó que las 4 llaves Wompi son de producción (`pub_prod_`, `prv_prod_`, `prod_*`) y que `INTERNAL_API_SECRET` coincide entre API y web.
+
+---
+
+## 2026-10-15 — Sincronizar API_VENDELO_DOCUMENTACION.md con el spec actual de Venndelo
+
+**Problema/Motivo:** La documentación local de la API de Venndelo estaba desactualizada respecto a <https://api.venndelo.com/v1/admin/#/>: faltaban el endpoint OAuth (nuevo método de autenticación recomendado, con la API Key deprecada), los filtros dinámicos de pedidos y varios campos nuevos, y muchos objetos anidados aparecían solo como `[{}]`.
+
+**Cambios:**
+
+- `API_VENDELO_DOCUMENTACION.md` — reescrito desde el spec OpenAPI (`/v1/admin/openapi-json`): autenticación OAuth (`POST /v1/admin/oauth/token`, rotación del refresh token) con la API Key `X-Venndelo-Api-Key` marcada como obsoleta; entrada 2026-06-12 del log de cambios; parámetro `filter` en Get Orders (y deprecación de `created_min`/`created_max`/`status`); campos `settlement`, `buyer_note`, `staff_note` y detalle de `shipments` en `ApiOrder`; `email`/`city_name`/`subdivision_name` en `ApiShippingInfo`; respuesta `PROCESSING` de generate-labels; `service_status` en ciudades; esquemas completos de line items, variaciones, novedades y puntos de recogida. Se agregó una sección de convenciones (paginación, códigos DANE, fechas).
+
+**Verificación:** Comparación manual del documento contra el volcado de las 36 operaciones y 82 schemas del spec OpenAPI descargado. Solo documentación; no hay cambios de código. Nota: `VendeloHttpClient.ts` sigue usando la cabecera `X-Venndelo-Api-Key` (deprecada); la migración a OAuth queda pendiente.
+
+---
+
+## 2026-10-15 — Integración Vendelo: autenticación OAuth y ajuste al spec actual (Fases 1–2 + guard de webhook)
+
+**Problema/Motivo:** Venndelo deprecó la autenticación por API Key (2026-06-12) en favor de OAuth con refresh token que rota, y el código enviaba/leía varios campos que no coinciden con el spec OpenAPI actual: unidades `kg`/`cm` en minúsculas, `shipping_info` sin `email`/`city_name`/`subdivision_name`, cotización sin `sku`/`name`/`unit_price`/`free_shipping`, `getOrder` leyendo un campo `carrier` que no existe, etiquetas sin manejar la respuesta `PROCESSING`, billetera leyendo una `currency` inexistente y metadata del webhook en un formato distinto a `{key, value}`. Además la URL base por defecto apuntaba a `api.vendelo.co` en vez de `api.venndelo.com`.
+
+**Cambios:**
+
+- `packages/database/prisma/schema.prisma` + migración `20261015120000_vendelo_oauth_and_city_status` — nueva tabla `VendeloCredential` (fila única con refresh/access token cifrados, `version` para compare-and-swap y lease de refresco); `VendeloCity` gana `subdivisionName`, `serviceStatus` (default `ACTIVE`) y `serviceUnavailableMessage`. **Migración no aplicada a la BD** — correr `prisma migrate deploy` en el despliegue.
+- `apps/api/src/shared/crypto/secret-box.ts` — cifrado AES-256-GCM para secretos persistidos.
+- `apps/api/src/infrastructure/services/VendeloAuthProvider.ts`, `VendeloOAuthTokenProvider.ts`, `vendelo-config.ts`, `infrastructure/repositories/PrismaVendeloCredentialStore.ts` — estrategia de autenticación elegida por `VENDELO_AUTH_MODE` (`apikey` default | `oauth`). El proveedor OAuth comparte el access token vía BD, cachea en memoria hasta `expires_at - 60s`, agrupa refrescos concurrentes (single-flight), coordina instancias con lease + CAS y conserva en memoria un refresh token rotado que no se pudo persistir.
+- `apps/api/src/infrastructure/services/VendeloHttpClient.ts` — usa el proveedor inyectado (`VENDELO_AUTH_PROVIDER`); ante un 401 en modo oauth invalida el token y reintenta una vez; un fallo obteniendo token no abre el circuit breaker; URL por defecto corregida a `https://api.venndelo.com`.
+- `apps/api/src/infrastructure/services/vendelo-api.types.ts` — contrato HTTP tipado desde el spec.
+- `apps/api/src/infrastructure/services/VendeloService.ts` — `KG`/`CM`; `shipping_info` completo (departamento desde la dirección o derivado del código DIVIPOLA); `buyer_note` desde las notas de entrega; cotización con los campos requeridos; `getOrder` lee `carrier_name`/`carrier_code` y prefiere el envío `OUTBOUND`; tipos de etiquetas, pickups y billetera según el spec.
+- `packages/domain/src/shared/colombia-divipola.ts` (movido desde `apps/web/src/lib/colombia-divipola.ts`, que ahora lo re-exporta) — el mapa de departamentos lo usan la web y la API.
+- `packages/domain` — `VendeloQuoteInput.items` acepta `sku`, `name`, `unitPrice`; `QuoteShipping` los completa desde el producto.
+- `apps/api/src/vendelo/vendelo.controller.ts` — `generate-labels` responde 202 con el progreso si Vendelo sigue generando (422 si falló); `health` informa `authMode`; `sync-cities` guarda nombre de departamento y estado del servicio.
+- `apps/api/src/vendelo/services/WalletAlertCron.ts`, `shipping-admin.service.ts` — tipos alineados (billetera siempre COP).
+- `apps/api/src/vendelo/guards/vendelo-webhook.guard.ts` — acepta la metadata en formato del spec `{key, value}` además del formato antiguo.
+- `apps/api/src/main.ts` — `assertEnvVars` exige `VENDELO_API_KEY` o `VENDELO_TOKEN_ENCRYPTION_KEY` según el modo, y valida el valor del modo.
+- `apps/api/scripts/` — `lib/vendelo-script-auth.ts` (los scripts usan el mismo proveedor que la API para no rotar el token por su cuenta), `seed-vendelo-refresh-token.ts` (nuevo: carga/reemplaza el refresh token y verifica con check-auth); `register-vendelo-webhook.ts` registra la metadata como `{key, value}` y su `--list` muestra el formato registrado sin revelar el secreto; `find-vendelo-city.ts` usa el proveedor.
+- `apps/api/.env.example`, `docs/faltantes-deploy.md`, `CLAUDE.md` — variables nuevas y patrón OAuth documentado.
+
+**Verificación:**
+
+- Tests nuevos: `secret-box.test.ts`, `VendeloOAuthTokenProvider.test.ts` (siembra, caché, token compartido entre instancias, single-flight, dos instancias concurrentes con un solo refresco, rotación, 401, refresh token rechazado, rotación no persistida), y casos añadidos en `VendeloHttpClient.test.ts`, `VendeloService.test.ts`, `VendeloWebhookGuard.test.ts`, `QuoteShipping.test.ts`.
+- `pnpm --filter @motek/api test` → 236/236 (antes 196). `pnpm --filter @motek/domain test` → 220/220; cobertura del dominio sobre umbrales (86.6 % statements).
+- Type-check limpio en domain, api (incluidos los scripts) y web (`src/`). `pnpm --filter @motek/api build` compila con webpack.
+- No probado contra Venndelo real: falta el refresh token de soporte. El modo por defecto sigue siendo `apikey`, así que el comportamiento en producción no cambia hasta activar `oauth`.
+- Nota: `apps/web/.next/dev/types/routes.d.ts` está truncado desde el 2026-09-17 (archivo generado, ajeno a este cambio) y hace fallar `pnpm --filter @motek/web type-check`; se regenera al levantar `next dev`.
+
+---
+
+## 2026-10-15 — Integración Vendelo: webhooks robustos, polling en lote, anulación sincronizada y cobertura de ciudades (Fases 3–4)
+
+**Problema/Motivo:** Dejar la integración lista para que solo falte cargar las credenciales de soporte. Pendientes: el webhook asumía una forma de payload no documentada y descartaba `SHIPMENT_STATUS_UPDATED`; el polling hacía una request por pedido; anular un pedido desde el admin no avisaba a Vendelo (y la ruta admin escribía Prisma directo), y la cola podía crear en Vendelo un pedido ya anulado; se podía pagar hacia ciudades con el servicio suspendido; el seguimiento no mostraba intentos de entrega ni estado de la transportadora. Además había un bug: `SyncShipmentStatus` pasaba `trackingNumber ?? null`, así que un evento posterior sin datos de envío (ej. `ORDER_DELIVERED`) borraba la guía guardada.
+
+**Cambios:**
+
+- `packages/domain` — `Shipment` gana `trackingStatus`, `deliveryAttempts`, `deliveredAt`, `trackingUpdatedAt`; `IShipmentRepository.updateTrackingDetails`; `SyncShipmentStatus` actualiza el detalle de seguimiento aunque el estado no avance, solo escribe lo que cambió y ya no borra guía/transportadora; nuevo use case `CancelOrder` (anula primero en Vendelo, rechaza envíos despachados, repone stock de pedidos pagados); `IVendeloShippingPort.getOrdersBatch` y `cancelOrder`; nuevo puerto `ICityCoverageRepository` y regla de ciudad `SUSPENDED` en `CreateOrder` y `QuoteShipping`; `IOrderRepository.findIdByVendeloOrderId`.
+- `packages/domain/vitest.config.ts` — `include: ['src/**/*.test.ts']`: tras un `build`, vitest también ejecutaba las copias compiladas en `dist/`. Corrección a la entrada anterior: el conteo real del dominio era 10 archivos (no 15/220); hoy son 11 archivos y 172 tests.
+- `packages/database/prisma/schema.prisma` + migración `20261015120000_vendelo_oauth_and_city_status` (aún sin aplicar, se amplió) — columnas de seguimiento en `Shipment` e índice `Order.vendeloOrderId`; `VendeloOrderQueue.status` admite `CANCELLED`.
+- `apps/api/src/vendelo/webhook/vendelo-webhook-payload.ts` (nuevo) — parser tolerante del sobre del webhook (evento en `event`/`type`/`event_type`; pedido en `data`/`data.order`/raíz; campos del spec o legados), mapeo de `SHIPMENT_STATUS_UPDATED` (estado del pedido o `tracking_status`; una devolución en curso no dispara `RETURNED`) y `describeShape` (estructura sin valores para logs).
+- `apps/api/src/vendelo/vendelo-webhook.controller.ts` — usa el parser; resuelve el pedido por ID de Vendelo si falta `external_order_id`; registra el detalle de seguimiento; loguea la estructura del primer evento de cada tipo.
+- `apps/api/src/vendelo/services/VendeloShipmentPollerCron.ts` — consulta en lote (`GET /v1/admin/orders?filter[id][$in]`, bloques de 50) con fallback uno a uno para faltantes o si el lote falla; pasa el detalle de seguimiento.
+- `apps/api/src/infrastructure/services/VendeloService.ts` — `getOrdersBatch`, `cancelOrder`, snapshot con detalle del envío `OUTBOUND`.
+- `apps/api/src/infrastructure/services/VendeloOrderQueueService.ts` — omite (estado `CANCELLED`) pedidos anulados antes de enviarse.
+- `apps/api/src/infrastructure/repositories/PrismaShipmentRepository.ts`, `PrismaCityCoverageRepository.ts` (nuevo), `PrismaOrderRepository.ts` (API y web), `injection-tokens.ts`, `infrastructure.module.ts` — implementaciones e inyección (`CITY_COVERAGE_REPOSITORY`).
+- `apps/api/src/orders/orders.controller.ts` — `PATCH /orders/:id/status` con `CANCELLED` usa `CancelOrder`; `orders`, `guest-orders` y `shipping` controllers validan cobertura de ciudad.
+- `apps/web/src/app/api/orders/[id]/status/route.ts` — delega en NestJS (antes escribía Prisma directo y saltaba toda la lógica de Vendelo).
+- `apps/web/src/components/admin/OrderStatusSelect.tsx` — confirma antes de anular y muestra el motivo de un rechazo.
+- `apps/web/src/app/api/vendelo/cities/route.ts`, `components/checkout/CitySelector.tsx` — ciudades suspendidas visibles pero no seleccionables, con el mensaje de Vendelo.
+- `apps/web/src/app/(store)/pedidos/seguimiento/page.tsx`, `app/api/admin/orders/[id]/route.ts`, `components/admin/OrderInfoModal.tsx` — muestran estado de la transportadora, intentos y fecha de entrega.
+- `docs/vendelo-activacion.md` (nuevo) — pasos para activar credenciales y verificar de punta a punta. `CLAUDE.md` — reglas de anulación, webhook y cobertura.
+
+**Verificación:**
+
+- Tests nuevos: `CancelOrder.test.ts`, `VendeloWebhookPayload.test.ts`, `VendeloWebhookController.test.ts`; casos añadidos en `SyncShipmentStatus`, `CreateOrder`, `QuoteShipping`, `VendeloShipmentPollerCron` (lote, faltantes, fallback), `VendeloService` (lote, paginación, cancelación), `VendeloOrderQueueService` (pedido anulado) y `orders.controller` (anulación).
+- `pnpm --filter @motek/api test` → 281/281. `pnpm --filter @motek/domain test` → 172/172; cobertura 88.4 % statements (umbrales OK).
+- Type-check limpio en domain y api; web limpio en `src/` (el `routes.d.ts` generado y truncado sigue pendiente de regenerar con `next dev`). ESLint de los archivos web tocados: 0 errores. `pnpm --filter @motek/api build` OK.
+- Sin prueba contra Venndelo real (faltan credenciales). Pasos de activación y verificación en `docs/vendelo-activacion.md`.
+
+---
+
+## 2026-10-15 — README: reglas de negocio de la integración Vendelo
+
+**Problema/Motivo:** Las reglas de negocio introducidas en la integración con Vendelo (OAuth, anulación sincronizada, estado del envío, cobertura de ciudades, webhook) solo estaban en CLAUDE.md y el historial. Además el README documentaba endpoints de Vendelo que no existen (`POST /shipments`, `POST /auth/token`, etc.), la URL base incorrecta y variables `VENDELO_PICKUP_*` que el código no lee.
+
+**Cambios:**
+
+- `README.md` — nueva sección 9.4 "Reglas de negocio de la integración" (y entrada en la tabla de contenidos); tabla de endpoints reemplazada por los reales del spec con quién los usa; protección nº 6 de `VendeloOrderQueueService` (pedidos anulados en cola); bloque de variables de entorno de Vendelo alineado con `apps/api/.env.example` (`VENDELO_STORE_*`, modo de autenticación, URL `api.venndelo.com`).
+
+**Verificación:** Revisión manual contra el código (`VendeloService`, `CancelOrder`, `SyncShipmentStatus`, `vendelo-webhook-payload.ts`, `.env.example`). Solo documentación, sin cambios de código.
+
+---
+
+## 2026-10-16 — Estado actualizado de faltantes para producción
+
+**Problema/Motivo:** `docs/faltantes-deploy.md` era un snapshot del 2026-08-11 y no reflejaba lo ya resuelto (archivos de entorno de producción en `C:\deploy\`) ni lo nuevo (migración Vendelo pendiente).
+
+**Cambios:**
+
+- `docs/faltantes-deploy.md` — nueva sección "Estado actualizado al 2026-10-16" con bloqueantes, importantes y menores. Hallazgos: la migración `20261015120000_vendelo_oauth_and_city_status` está pendiente; todos los archivos de entorno (desarrollo y producción) apuntan a la misma base de Neon; `TURNSTILE_SECRET_KEY` y los DSN de Sentry están vacíos en producción; `.env.example` documenta `JWT_EXPIRES_IN` pero el código lee `JWT_EXPIRY`.
+
+**Verificación:** `prisma migrate status` (solo lectura) y un script que reporta presencia/ausencia de cada variable sin imprimir valores; la base se comparó por huella del host, sin exponer la URL.
+
+---
+
+## 2026-10-16 — Eliminar imágenes estáticas de hero banners sin uso
+
+**Problema/Motivo:** Los banners del carrusel se administran desde `/admin/banners` (tabla `HeroBanner`, imágenes en Cloudinary); las imágenes estáticas `hero_banner_slide1-4.jpeg` ya no se referencian en el código.
+
+**Cambios:**
+
+- `apps/web/public/assets/heroBanners/hero_banner_slide{1,2,3,4}.jpeg` — eliminadas.
+
+**Verificación:** búsqueda de `heroBanners/` y `hero_banner_slide` en `apps/web/src`, `next.config.ts` y `packages`: sin referencias.
