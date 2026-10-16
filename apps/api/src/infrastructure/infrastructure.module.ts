@@ -10,8 +10,11 @@ import {
   PAYMENT_SERVICE,
   SHIPMENT_REPOSITORY,
   VENDELO_SHIPPING_PORT,
+  VENDELO_AUTH_PROVIDER,
   ALERT_NOTIFICATION_PORT,
 } from './injection-tokens'
+import { PrismaService } from './database/prisma.service'
+import { createVendeloAuthProvider } from './services/VendeloAuthProvider'
 import { PrismaCouponRepository } from './repositories/PrismaCouponRepository'
 import { PrismaProductRepository } from './repositories/PrismaProductRepository'
 import { PrismaStockSyncRepository } from './repositories/PrismaStockSyncRepository'
@@ -54,6 +57,12 @@ import { ExpiredOrdersCleanupService } from './services/ExpiredOrdersCleanupServ
     TurnstileService,
     CloudinaryService,
     EmailQueueService,
+    // apikey (heredado) u oauth según VENDELO_AUTH_MODE
+    {
+      provide: VENDELO_AUTH_PROVIDER,
+      inject: [PrismaService],
+      useFactory: (prisma: PrismaService) => createVendeloAuthProvider(prisma.client),
+    },
     VendeloHttpClient,
     VendeloService,
     VendeloOrderQueueService,
@@ -73,7 +82,7 @@ import { ExpiredOrdersCleanupService } from './services/ExpiredOrdersCleanupServ
     USER_REPOSITORY,
     SHIPMENT_REPOSITORY,
     VENDELO_SHIPPING_PORT,
-    PAYMENT_SERVICE,
+      PAYMENT_SERVICE,
     ALERT_NOTIFICATION_PORT,
     WompiService,
     MercadoPagoService,

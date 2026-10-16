@@ -50,9 +50,22 @@ function assertEnvVars(): void {
     'WOMPI_EVENTS_SECRET',
     'WOMPI_INTEGRITY_SECRET',
     'RESEND_API_KEY',
-    'VENDELO_API_KEY',
     'VENDELO_WEBHOOK_SECRET',
   ]
+
+  // Credencial de Venndelo según el modo: la API Key (deprecada) o la clave que
+  // cifra el refresh token OAuth en BD. El refresh token en sí no es obligatorio
+  // aquí: tras la primera rotación vive en la tabla VendeloCredential.
+  const vendeloAuthMode = (process.env['VENDELO_AUTH_MODE'] ?? 'apikey').trim().toLowerCase()
+  if (vendeloAuthMode === 'oauth') {
+    required.push('VENDELO_TOKEN_ENCRYPTION_KEY')
+  } else if (vendeloAuthMode === 'apikey') {
+    required.push('VENDELO_API_KEY')
+  } else {
+    console.error(`[Bootstrap] VENDELO_AUTH_MODE inválido: "${vendeloAuthMode}" (valores: apikey | oauth)`)
+    process.exit(1)
+  }
+
   const missing = required.filter((k) => !process.env[k])
   if (missing.length > 0) {
     console.error(`[Bootstrap] Variables de entorno requeridas no configuradas: ${missing.join(', ')}`)

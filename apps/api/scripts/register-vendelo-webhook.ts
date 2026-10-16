@@ -12,19 +12,21 @@
  *   pnpm exec tsx scripts/register-vendelo-webhook.ts [--list|--delete <id>]
  *
  * Variables requeridas (lee de .env y .env.local):
- *   - VENDELO_API_KEY
+ *   - Credencial según VENDELO_AUTH_MODE (ver scripts/lib/vendelo-script-auth.ts):
+ *       apikey → VENDELO_API_KEY
+ *       oauth  → DATABASE_URL + VENDELO_TOKEN_ENCRYPTION_KEY
  *   - VENDELO_API_URL          (default: https://api.venndelo.com)
  *   - VENDELO_WEBHOOK_SECRET   (el mismo que está en Cloud Run Secret Manager)
  *   - VENDELO_WEBHOOK_URL      (URL pública del backend + /vendelo/webhook)
  */
 import dotenv from 'dotenv'
 import path from 'path'
+import { createScriptAuth, type VendeloScriptAuth } from './lib/vendelo-script-auth'
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') })
 dotenv.config({ path: path.resolve(__dirname, '../.env.local'), override: true })
 
 const API_URL = (process.env['VENDELO_API_URL'] ?? 'https://api.venndelo.com').replace(/\/$/, '')
-const API_KEY = process.env['VENDELO_API_KEY']
 const SECRET  = process.env['VENDELO_WEBHOOK_SECRET']
 // Sin default: un fallback equivocado registra en Venndelo un webhook que no
 // apunta a ningún backend y falla en silencio. Mejor exigir la URL explícita.
@@ -45,12 +47,10 @@ const EVENTS = [
   'SHIPMENT_STATUS_UPDATED',
 ] as const
 
-// Header oficial según la doc de Venndelo (jun 2026)
-const AUTH_HEADER = 'X-Venndelo-Api-Key'
+let auth: VendeloScriptAuth
 
 function assertEnv() {
   const missing: string[] = []
-  if (!API_KEY) missing.push('VENDELO_API_KEY')
   if (!SECRET)  missing.push('VENDELO_WEBHOOK_SECRET')
   if (!HOOK_URL) missing.push('VENDELO_WEBHOOK_URL')
   if (missing.length) {
@@ -63,7 +63,7 @@ async function vendeloFetch<T>(path: string, init?: RequestInit): Promise<{ stat
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
     headers: {
-      [AUTH_HEADER]: API_KEY!,
+      ...(await auth.getHeaders()),
       'Content-Type': 'application/json',
       Accept: 'application/json',
       ...(init?.headers ?? {}),
@@ -80,6 +80,18 @@ interface Connection {
   name: string
   status: 'ENABLED' | 'DISABLED' | 'PAUSED' | 'ACTIVATING'
   settings: { url: string; events: string[] }
+  metadata?: Array<Record<string, unknown>>
+}
+
+/**
+ * Describe el formato de la metadata registrada SIN imprimir valores:
+ * `{key,value}` (spec) vs `{motek_webhook_secret}` (formato antiguo).
+ */
+function describeMetadata(metadata: Connection['metadata']): string {
+  if (!metadata?.length) return 'sin metadata'
+  return metadata
+    .map((item) => (typeof item['key'] === 'string' ? `{key:"${item['key']}", value:***}` : `{${Object.keys(item).join(',')}}`))
+    .join(' ')
 }
 
 interface ListResponse {
@@ -114,8 +126,9 @@ async function create(): Promise<Connection> {
       sources: ['API'],
       excluded_sales_channels: [],
     },
-    // Patrón de seguridad: el guard del backend valida este campo
-    metadata: [{ motek_webhook_secret: SECRET }],
+    // Patrón de seguridad: el guard del backend valida este campo.
+    // Formato {key, value} = ApiChatbotConnectionMetadataItem del spec.
+    metadata: [{ key: 'motek_webhook_secret', value: SECRET! }],
   }
 
   const { status, body } = await vendeloFetch<Connection>('/v1/admin/chatbot/connections', {
@@ -139,13 +152,16 @@ async function del(id: string): Promise<void> {
 
 async function main() {
   assertEnv()
+  auth = await createScriptAuth()
   const arg = process.argv[2]
 
   if (arg === '--list') {
     const items = await list()
     console.log(`\n${items.length} conexion(es):\n`)
     items.forEach((c) =>
-      console.log(`  • ${c.id}  ${c.status.padEnd(10)}  url=${c.settings.url}  name="${c.name}"`),
+      console.log(
+        `  • ${c.id}  ${c.status.padEnd(10)}  url=${c.settings.url}  name="${c.name}"  metadata=${describeMetadata(c.metadata)}`,
+      ),
     )
     return
   }
@@ -185,7 +201,9 @@ async function main() {
   console.log(`\nGuarda ${created.id} por si necesitas borrarla luego.`)
 }
 
-main().catch((e) => {
-  console.error(`\n❌  ${e instanceof Error ? e.message : e}`)
-  process.exit(1)
-})
+main()
+  .catch((e) => {
+    console.error(`\n❌  ${e instanceof Error ? e.message : e}`)
+    process.exitCode = 1
+  })
+  .finally(() => auth?.close())
