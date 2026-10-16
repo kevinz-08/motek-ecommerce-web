@@ -727,3 +727,14 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 
 **Verificación:** `prisma migrate status` (solo lectura) y un script que reporta presencia/ausencia de cada variable sin imprimir valores; la base se comparó por huella del host, sin exponer la URL.
 
+---
+
+## 2026-10-16 — Eliminar imágenes estáticas de hero banners sin uso
+
+**Problema/Motivo:** Los banners del carrusel se administran desde `/admin/banners` (tabla `HeroBanner`, imágenes en Cloudinary); las imágenes estáticas `hero_banner_slide1-4.jpeg` ya no se referencian en el código.
+
+**Cambios:**
+
+- `apps/web/public/assets/heroBanners/hero_banner_slide{1,2,3,4}.jpeg` — eliminadas.
+
+**Verificación:** búsqueda de `heroBanners/` y `hero_banner_slide` en `apps/web/src`, `next.config.ts` y `packages`: sin referencias.
