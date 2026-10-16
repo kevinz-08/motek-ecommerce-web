@@ -128,7 +128,7 @@ export interface ReceiptData {
 const ISSUER = {
   name: 'Motek Store',
   nit: '1007784964-5',
-  address: 'Carrera 21 #21-58, Bucaramanga, Santander',
+  address: 'Boulevard Santander #23-31, Bucaramanga, Santander',
   email: 'motekdev@gmail.com',
   phone: '+57 315 292 6609',
 }

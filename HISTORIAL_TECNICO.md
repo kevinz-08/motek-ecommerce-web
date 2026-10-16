@@ -615,3 +615,17 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Archivos no versionados (`.gitignore`), no requiere commit.
 
 **Verificación:** No aplica activación en runtime — cambio de valores en bloque comentado, sandbox sigue siendo el activo en local. Falta activar el bloque prod (y todas las demás variables de entorno productivas listadas abajo) al momento real del despliegue.
+
+---
+
+## 2026-09-29 — Corregir dirección del emisor en el recibo PDF
+
+**Problema/Motivo:** El recibo PDF mostraba `Carrera 21 #21-58` como dirección de la tienda, distinta de la dirección real usada en contacto (`apps/web/src/lib/contact.ts`) y en la recogida de Vendelo (`Boulevard Santander #23-31`).
+
+**Cambios:**
+
+- `apps/web/src/lib/receipt/ReceiptPdf.tsx` — `ISSUER.address` pasa a `Boulevard Santander #23-31, Bucaramanga, Santander`.
+- Preparación del despliegue a Cloud Run (fuera del repo, no versionado): se generaron `C:\deploy\api.env.production` (secretos para Secret Manager), `C:\deploy\api.env.yaml` (variables no secretas de la API) y `C:\deploy\web.env.production` (variables para Vercel) con llaves Wompi de producción, `JWT_SECRET` / `INTERNAL_API_SECRET` / `AUTH_SECRET` nuevos y datos de recogida Vendelo (`VENDELO_STORE_CITY_CODE=68001000`, `VENDELO_STORE_SUBDIVISION_CODE=68`). Los `.env` locales no se modificaron.
+
+**Verificación:** Cambio de una constante de texto; sin impacto en tipos. El script de generación validó que las 4 llaves Wompi son de producción (`pub_prod_`, `prv_prod_`, `prod_*`) y que `INTERNAL_API_SECRET` coincide entre API y web.
+
