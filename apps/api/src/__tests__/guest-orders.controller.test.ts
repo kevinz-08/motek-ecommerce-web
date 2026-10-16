@@ -22,6 +22,7 @@ vi.mock('@motek/domain', async (importOriginal) => {
     IVendeloShippingPort: undefined,
     ICouponRepository: undefined,
     IShipmentRepository: undefined,
+    ICityCoverageRepository: undefined,
     CreateOrder: vi.fn().mockImplementation(function () {
       return {
         execute: vi.fn().mockResolvedValue({
@@ -51,6 +52,7 @@ import {
   VENDELO_SHIPPING_PORT,
   COUPON_REPOSITORY,
   SHIPMENT_REPOSITORY,
+  CITY_COVERAGE_REPOSITORY,
 } from '../infrastructure/injection-tokens'
 import type { CreateGuestOrderDto } from '../orders/dto/create-guest-order.dto'
 
@@ -160,6 +162,7 @@ async function buildController() {
       { provide: VENDELO_SHIPPING_PORT, useValue: mockShippingPort },
       { provide: COUPON_REPOSITORY, useValue: mockCouponRepo },
       { provide: SHIPMENT_REPOSITORY, useValue: mockShipmentRepo },
+      { provide: CITY_COVERAGE_REPOSITORY, useValue: { findByCityCode: vi.fn().mockResolvedValue(null) } },
       { provide: MercadoPagoService, useValue: mockMercadoPagoService },
       { provide: ResendEmailService, useValue: mockEmailService },
       { provide: TurnstileService, useValue: mockTurnstile },

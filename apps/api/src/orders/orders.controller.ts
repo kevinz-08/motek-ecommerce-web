@@ -7,11 +7,11 @@ import { Throttle } from '@nestjs/throttler'
 import {
   IOrderRepository, IProductRepository, IPaymentService, IVendeloShippingPort,
   ICouponRepository, CreateOrder, QuoteShipping, ValidateCoupon, OrderStatus,
-  ClaimGuestOrders,
+  ClaimGuestOrders, CancelOrder, IShipmentRepository, ICityCoverageRepository,
 } from '@motek/domain'
 import {
   ORDER_REPOSITORY, PRODUCT_REPOSITORY, PAYMENT_SERVICE, VENDELO_SHIPPING_PORT,
-  COUPON_REPOSITORY,
+  COUPON_REPOSITORY, SHIPMENT_REPOSITORY, CITY_COVERAGE_REPOSITORY,
 } from '../infrastructure/injection-tokens'
 import { MercadoPagoService } from '../infrastructure/services/MercadoPagoService'
 import { WompiService } from '../infrastructure/services/WompiService'
@@ -41,6 +41,8 @@ export class OrdersController {
     @Inject(PAYMENT_SERVICE)        private readonly wompiService: IPaymentService,
     @Inject(VENDELO_SHIPPING_PORT)  private readonly shippingPort: IVendeloShippingPort,
     @Inject(COUPON_REPOSITORY)      private readonly couponRepo: ICouponRepository,
+    @Inject(SHIPMENT_REPOSITORY)    private readonly shipmentRepo: IShipmentRepository,
+    @Inject(CITY_COVERAGE_REPOSITORY) private readonly cityCoverage: ICityCoverageRepository,
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly emailService: ResendEmailService,
     private readonly emailQueue: EmailQueueService,
@@ -91,8 +93,9 @@ export class OrdersController {
       this.orderRepo,
       this.productRepo,
       paymentService,
-      new QuoteShipping(this.productRepo, this.shippingPort),
+      new QuoteShipping(this.productRepo, this.shippingPort, this.cityCoverage),
       new ValidateCoupon(this.couponRepo, this.orderRepo),
+      this.cityCoverage,
     )
     const result = await useCase.execute({
       customer: { kind: 'user', userId: user.id, email: user.email },
@@ -168,13 +171,27 @@ export class OrdersController {
     return result.value
   }
 
+  /**
+   * Anular (CANCELLED) pasa por el use case CancelOrder: si el pedido ya está
+   * en Vendelo lo anula allá primero, y rechaza anular envíos ya despachados.
+   * El resto de estados se asignan directo (comportamiento previo).
+   */
   @Patch(':id/status')
   @Roles('ADMIN')
-  @ApiOperation({ summary: '[ADMIN] Actualizar estado de un pedido' })
+  @ApiOperation({ summary: '[ADMIN] Actualizar estado de un pedido (anular también anula en Vendelo)' })
   async updateStatus(
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
   ) {
+    if (dto.status === 'CANCELLED') {
+      const result = await new CancelOrder(this.orderRepo, this.shipmentRepo, this.shippingPort).execute({ orderId: id })
+      if (!result.ok) throw result.error
+      this.logger.log(
+        `[CancelOrder] orderId=${id} cancelledInVendelo=${result.value.cancelledInVendelo} alreadyCancelled=${result.value.alreadyCancelled}`,
+      )
+      return { success: true, status: dto.status, ...result.value }
+    }
+
     await this.orderRepo.updateStatus(id, dto.status as OrderStatus)
     return { success: true, status: dto.status }
   }

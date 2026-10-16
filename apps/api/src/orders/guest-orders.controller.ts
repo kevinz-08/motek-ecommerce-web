@@ -6,12 +6,12 @@ import { ApiOperation, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
 import {
   IOrderRepository, IProductRepository, IPaymentService, IVendeloShippingPort,
-  ICouponRepository, IShipmentRepository, CreateOrder, QuoteShipping, ValidateCoupon,
+  ICouponRepository, IShipmentRepository, ICityCoverageRepository, CreateOrder, QuoteShipping, ValidateCoupon,
   Order,
 } from '@motek/domain'
 import {
   ORDER_REPOSITORY, PRODUCT_REPOSITORY, PAYMENT_SERVICE, VENDELO_SHIPPING_PORT,
-  COUPON_REPOSITORY, SHIPMENT_REPOSITORY,
+  COUPON_REPOSITORY, SHIPMENT_REPOSITORY, CITY_COVERAGE_REPOSITORY,
 } from '../infrastructure/injection-tokens'
 import { MercadoPagoService } from '../infrastructure/services/MercadoPagoService'
 import { ResendEmailService } from '../infrastructure/services/ResendEmailService'
@@ -90,6 +90,7 @@ export class GuestOrdersController {
     @Inject(VENDELO_SHIPPING_PORT) private readonly shippingPort: IVendeloShippingPort,
     @Inject(COUPON_REPOSITORY)     private readonly couponRepo: ICouponRepository,
     @Inject(SHIPMENT_REPOSITORY)   private readonly shipmentRepo: IShipmentRepository,
+    @Inject(CITY_COVERAGE_REPOSITORY) private readonly cityCoverage: ICityCoverageRepository,
     private readonly mercadoPagoService: MercadoPagoService,
     private readonly emailService: ResendEmailService,
     private readonly turnstile: TurnstileService,
@@ -165,8 +166,9 @@ export class GuestOrdersController {
       this.orderRepo,
       this.productRepo,
       paymentService,
-      new QuoteShipping(this.productRepo, this.shippingPort),
+      new QuoteShipping(this.productRepo, this.shippingPort, this.cityCoverage),
       new ValidateCoupon(this.couponRepo, this.orderRepo),
+      this.cityCoverage,
     )
     const result = await useCase.execute({
       customer: {

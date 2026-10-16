@@ -12,6 +12,7 @@ vi.mock('@motek/domain', async (importOriginal) => {
     ...actual,
     IProductRepository: undefined,
     IVendeloShippingPort: undefined,
+    ICityCoverageRepository: undefined,
     QuoteShipping: vi.fn().mockImplementation(function () {
       return { execute: mockExecute }
     }),
@@ -19,13 +20,14 @@ vi.mock('@motek/domain', async (importOriginal) => {
 })
 
 import { ShippingController } from '../shipping/shipping.controller'
-import { PRODUCT_REPOSITORY, VENDELO_SHIPPING_PORT } from '../infrastructure/injection-tokens'
+import { CITY_COVERAGE_REPOSITORY, PRODUCT_REPOSITORY, VENDELO_SHIPPING_PORT } from '../infrastructure/injection-tokens'
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
 const mockExecute = vi.fn()
 const mockProductRepo = { findById: vi.fn() }
 const mockShippingPort = { quoteOrder: vi.fn() }
+const mockCityCoverage = { findByCityCode: vi.fn() }
 
 const VALID_DTO = {
   shippingCityCode: '11001000',
@@ -42,6 +44,7 @@ async function buildController() {
     providers: [
       { provide: PRODUCT_REPOSITORY, useValue: mockProductRepo },
       { provide: VENDELO_SHIPPING_PORT, useValue: mockShippingPort },
+      { provide: CITY_COVERAGE_REPOSITORY, useValue: mockCityCoverage },
     ],
   }).compile()
 

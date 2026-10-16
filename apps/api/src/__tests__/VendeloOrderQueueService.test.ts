@@ -25,6 +25,7 @@ interface QueueRow {
 interface OrderRow {
   id: string
   userId: string
+  status?: string
   vendeloOrderId: string | null
   shippingAddress: unknown
   buyerIdType: string
@@ -184,6 +185,19 @@ describe('VendeloOrderQueueService', () => {
       items: Array<{ productSnapshot?: { weightKg?: number | null; heightCm?: number | null; widthCm?: number | null; lengthCm?: number | null } }>
     }]
     expect(domainOrder.items[0].productSnapshot).toMatchObject({ weightKg: 3.2, heightCm: 20, widthCm: 15, lengthCm: 30 })
+  })
+
+  it('omite (CANCELLED) un pedido anulado mientras esperaba en cola — no lo crea en Vendelo', async () => {
+    prismaMock.client.vendeloOrderQueue.findMany.mockResolvedValue([makeQueueRow()])
+    prismaMock.client.order.findUnique.mockResolvedValue(makeOrderRow({ status: 'CANCELLED' }))
+
+    await service.processNext()
+
+    expect(vendeloServiceMock.createOrder).not.toHaveBeenCalled()
+    expect(prismaMock.client.vendeloOrderQueue.update).toHaveBeenCalledWith({
+      where: { id: 'queue-001' },
+      data: { status: 'CANCELLED', processingStartedAt: null },
+    })
   })
 
   // ── Causa B: segundo worker agarra la misma fila ─────────────────────────

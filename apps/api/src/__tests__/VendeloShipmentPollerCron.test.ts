@@ -34,6 +34,7 @@ function makeShipmentRepoMock(): IShipmentRepository {
     findByOrderId: vi.fn().mockResolvedValue(null),
     upsert: vi.fn().mockResolvedValue(undefined),
     atomicUpdateStatus: vi.fn().mockResolvedValue({ applied: true }),
+    updateTrackingDetails: vi.fn().mockResolvedValue(undefined),
   } as unknown as IShipmentRepository
 }
 
@@ -45,6 +46,8 @@ function makePortMock(snapshot: Partial<VendeloOrderSnapshot> = {}): IVendeloShi
       trackingNumber: snapshot.trackingNumber ?? '1Z999',
       carrier: snapshot.carrier ?? 'COORDINADORA',
     }),
+    // Lote vacío por defecto: todos los pedidos caen al fallback uno a uno
+    getOrdersBatch: vi.fn().mockResolvedValue([]),
     createShipments: vi.fn(),
     getException: vi.fn(),
     resolveException: vi.fn(),
@@ -283,5 +286,77 @@ describe('VendeloShipmentPollerCron — lifecycle', () => {
     cron.onModuleDestroy()
 
     expect(clearSpy).toHaveBeenCalled()
+  })
+})
+
+// ── Consulta en lote ──────────────────────────────────────────────────────────
+
+describe('VendeloShipmentPollerCron — consulta en lote', () => {
+  function snapshot(id: string, overrides: Partial<VendeloOrderSnapshot> = {}): VendeloOrderSnapshot {
+    return { id, status: 'SHIPPED', trackingNumber: `TRK-${id}`, carrier: 'Coordinadora', ...overrides }
+  }
+
+  function makeOrderRepoWithOrder(active: ActiveVendeloOrder[]) {
+    const repo = makeOrderRepoMock(active)
+    vi.spyOn(repo, 'findById').mockResolvedValue({ id: 'order-1', userId: 'user-1', status: 'PAID' } as never)
+    return repo
+  }
+
+  const orders = [
+    buildOrder({ orderId: 'o1', vendeloOrderId: 'v1' }),
+    buildOrder({ orderId: 'o2', vendeloOrderId: 'v2' }),
+    buildOrder({ orderId: 'o3', vendeloOrderId: 'v3' }),
+  ]
+
+  it('si el lote trae todos los pedidos, no hace consultas individuales', async () => {
+    const port = makePortMock()
+    vi.mocked(port.getOrdersBatch).mockResolvedValue([snapshot('v1'), snapshot('v2'), snapshot('v3')])
+    const cron = makeCron({ orderRepo: makeOrderRepoWithOrder(orders), port })
+
+    const result = await cron.tick()
+
+    expect(port.getOrdersBatch).toHaveBeenCalledWith(['v1', 'v2', 'v3'])
+    expect(port.getOrder).not.toHaveBeenCalled()
+    expect(result).toMatchObject({ fetchedInBatch: 3, fetchedIndividually: 0, transitionsApplied: 3 })
+  })
+
+  it('consulta uno a uno solo los que faltaron en el lote', async () => {
+    const port = makePortMock()
+    vi.mocked(port.getOrdersBatch).mockResolvedValue([snapshot('v1'), snapshot('v3')])
+    const cron = makeCron({ orderRepo: makeOrderRepoWithOrder(orders), port })
+
+    const result = await cron.tick()
+
+    expect(port.getOrder).toHaveBeenCalledTimes(1)
+    expect(port.getOrder).toHaveBeenCalledWith('v2')
+    expect(result).toMatchObject({ fetchedInBatch: 2, fetchedIndividually: 1 })
+  })
+
+  it('si el lote falla, cae al fallback uno a uno sin perder el ciclo', async () => {
+    const port = makePortMock()
+    vi.mocked(port.getOrdersBatch).mockRejectedValue(new Error('Vendelo API 422: filter not supported'))
+    const cron = makeCron({ orderRepo: makeOrderRepoWithOrder(orders), port })
+
+    const result = await cron.tick()
+
+    expect(port.getOrder).toHaveBeenCalledTimes(3)
+    expect(result).toMatchObject({ fetchedInBatch: 0, fetchedIndividually: 3, errors: 0 })
+  })
+
+  it('pasa el detalle de seguimiento del snapshot a SyncShipmentStatus', async () => {
+    const shipmentRepo = makeShipmentRepoMock()
+    vi.spyOn(shipmentRepo, 'findByOrderId').mockResolvedValue(null)
+    const port = makePortMock()
+    vi.mocked(port.getOrdersBatch).mockResolvedValue([
+      snapshot('vendelo-1', { trackingStatus: 'OUT-FOR-DELIVERY', deliveryAttempts: 2 }),
+    ])
+    const cron = makeCron({ orderRepo: makeOrderRepoWithOrder([buildOrder()]), shipmentRepo, port })
+
+    await cron.tick()
+
+    expect(shipmentRepo.updateTrackingDetails).toHaveBeenCalledWith('order-1', {
+      trackingStatus: 'OUT-FOR-DELIVERY',
+      deliveryAttempts: 2,
+    })
   })
 })

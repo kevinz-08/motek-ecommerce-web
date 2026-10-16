@@ -135,3 +135,53 @@ describe('VendeloWebhookGuard — modo desarrollo', () => {
     expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException)
   })
 })
+
+// ── Formato {key, value} del spec (ApiChatbotConnectionMetadataItem) ─────────
+
+describe('VendeloWebhookGuard — metadata en formato {key, value}', () => {
+  it('acepta el secreto en formato del spec en la raíz', () => {
+    const guard = makeGuard()
+    const ctx = makeContext({
+      event: 'ORDER_SHIPPED',
+      metadata: [{ key: SECRET_KEY, value: TEST_SECRET }],
+    })
+
+    expect(guard.canActivate(ctx)).toBe(true)
+  })
+
+  it('acepta el secreto en formato del spec anidado en data, entre otros items', () => {
+    const guard = makeGuard()
+    const ctx = makeContext({
+      event: 'ORDER_DELIVERED',
+      data: {
+        metadata: [
+          { key: 'otra_clave', value: 'x' },
+          { key: SECRET_KEY, value: TEST_SECRET },
+        ],
+      },
+    })
+
+    expect(guard.canActivate(ctx)).toBe(true)
+  })
+
+  it('rechaza un {key, value} con el secreto incorrecto', () => {
+    const guard = makeGuard()
+    const ctx = makeContext({ metadata: [{ key: SECRET_KEY, value: 'incorrecto' }] })
+
+    expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException)
+  })
+
+  it('no confunde el valor de otra clave con el secreto', () => {
+    const guard = makeGuard()
+    const ctx = makeContext({ metadata: [{ key: 'otra_clave', value: TEST_SECRET }] })
+
+    expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException)
+  })
+
+  it('ignora metadata con forma inesperada sin lanzar errores de tipo', () => {
+    const guard = makeGuard()
+    const ctx = makeContext({ metadata: 'no-es-array' as unknown as Array<Record<string, unknown>> })
+
+    expect(() => guard.canActivate(ctx)).toThrow(UnauthorizedException)
+  })
+})

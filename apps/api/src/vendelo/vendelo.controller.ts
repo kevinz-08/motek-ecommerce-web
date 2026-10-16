@@ -40,7 +40,7 @@ export class VendeloController {
   @ApiOperation({ summary: 'Smoke test: verifica conectividad y autenticación con Vendelo API' })
   async checkHealth() {
     const info = await this.vendeloService.checkAuth()
-    return { ok: true, vendelo: info }
+    return { ok: true, authMode: this.vendeloService.getAuthMode(), vendelo: info }
   }
 
   @Post('sync-cities')
@@ -59,12 +59,16 @@ export class VendeloController {
           name: c.name,
           subdivisionCode: c.subdivision_code,
           countryCode: c.country_code ?? 'CO',
+          subdivisionName: c.subdivision_name?.trim() || null,
+          serviceStatus: c.service_status === 'SUSPENDED' ? 'SUSPENDED' : 'ACTIVE',
+          serviceUnavailableMessage: c.service_unavailable_message?.trim() || null,
         })),
         skipDuplicates: true,
       })
     })
 
-    return { synced: cities.length }
+    const suspended = cities.filter((c) => c.service_status === 'SUSPENDED').length
+    return { synced: cities.length, suspended }
   }
 
   // ── Fase 4: Operaciones logísticas ──────────────────────────────────────────
@@ -92,16 +96,32 @@ export class VendeloController {
    * Genera etiquetas PDF para los pedidos indicados.
    * Con output=URL (por defecto) retorna la URL temporal de Vendelo.
    * Con output=BASE64 descarga el PDF directamente desde el navegador.
+   * Si Vendelo aún está creando los envíos responde 202 con el progreso:
+   * el admin debe reintentar en unos segundos.
    */
   @Post('generate-labels')
   @HttpCode(200)
-  @ApiOperation({ summary: 'Genera etiquetas PDF de envío para los pedidos indicados' })
+  @ApiOperation({ summary: 'Genera etiquetas PDF de envío para los pedidos indicados (202 si siguen en proceso)' })
   async generateLabels(@Body() dto: GenerateLabelsDto, @Res() res: Response) {
     const result = await this.shippingAdmin.generateLabels(
       dto.orderIds,
       dto.format,
       dto.output ?? 'URL',
     )
+
+    if (result.status !== 'SUCCESS') {
+      const httpStatus = result.status === 'PROCESSING' ? 202 : 422
+      return res.status(httpStatus).json({
+        status: result.status,
+        itemsProcessed: result.items_processed,
+        itemsCount: result.items_count,
+        items: result.items,
+        skipped: result.skipped,
+        message: result.status === 'PROCESSING'
+          ? 'Vendelo aún está generando las etiquetas — reintenta en unos segundos'
+          : 'Vendelo no pudo generar algunas etiquetas — revisa `items[].errors`',
+      })
+    }
 
     if (dto.output === 'BASE64' && result.data) {
       const buffer = Buffer.from(result.data, 'base64')

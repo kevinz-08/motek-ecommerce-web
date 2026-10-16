@@ -91,6 +91,17 @@ export class VendeloOrderQueueService implements OnModuleInit, OnModuleDestroy {
           continue
         }
 
+        // Pedido anulado mientras esperaba en cola (CancelOrder desde el admin):
+        // crearlo en Vendelo despacharía un mensajero hacia un pedido inexistente.
+        if (order.status === 'CANCELLED') {
+          await this.prisma.client.vendeloOrderQueue.update({
+            where: { id: item.id },
+            data: { status: 'CANCELLED', processingStartedAt: null },
+          })
+          this.logger.warn(`[VendeloOrderQueue] Skip: pedido cancelado antes de enviarse a Vendelo ${ctx}`)
+          continue
+        }
+
         // Guard de idempotencia: si el pedido ya tiene vendeloOrderId, ya se creó
         // en Vendelo en una corrida anterior. No volver a llamar a createOrder.
         if (order.vendeloOrderId) {

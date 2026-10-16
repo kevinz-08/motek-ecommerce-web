@@ -18,7 +18,7 @@ import type { Request } from 'express'
  * webhook tal cual lo registramos. Lo usamos como secreto compartido:
  *
  *   1. Al registrar la conexión (`POST /v1/admin/chatbot/connections`)
- *      enviamos `metadata: [{ "motek_webhook_secret": <VENDELO_WEBHOOK_SECRET> }]`
+ *      enviamos `metadata: [{ key: "motek_webhook_secret", value: <VENDELO_WEBHOOK_SECRET> }]`
  *   2. Cada webhook que nos manda Venndelo trae ese metadata.
  *   3. Este guard valida `metadata[].motek_webhook_secret === VENDELO_WEBHOOK_SECRET`
  *      con comparación timing-safe.
@@ -90,15 +90,21 @@ export class VendeloWebhookGuard implements CanActivate {
    * Soporta dos ubicaciones porque la doc de Venndelo no es explícita:
    *   - root.metadata[]
    *   - root.data.metadata[]
+   * Y dos formatos de ítem:
+   *   - `{ key: 'motek_webhook_secret', value: '<secret>' }` — el del spec
+   *     (ApiChatbotConnectionMetadataItem), usado por el script de registro actual.
+   *   - `{ motek_webhook_secret: '<secret>' }` — formato con el que se registraron
+   *     las conexiones antiguas; se acepta mientras sigan existiendo.
    */
   private extractSecret(body: VendeloWebhookBody): string | null {
     const candidates: VendeloMetadataItem[] = [
-      ...(body.metadata ?? []),
-      ...(body.data?.metadata ?? []),
+      ...(Array.isArray(body.metadata) ? body.metadata : []),
+      ...(Array.isArray(body.data?.metadata) ? body.data.metadata : []),
     ]
 
     for (const item of candidates) {
-      const value = item?.[METADATA_SECRET_KEY]
+      if (!item || typeof item !== 'object') continue
+      const value = item['key'] === METADATA_SECRET_KEY ? item['value'] : item[METADATA_SECRET_KEY]
       if (typeof value === 'string' && value.length > 0) return value
     }
     return null
