@@ -4,6 +4,50 @@
 > tomar decisiones sobre él, verificar contra los `.env.example` actuales y el estado real
 > de Vercel / Cloud Run / GitHub, ya que puede quedar desactualizado.
 
+## Estado actualizado al 2026-10-16
+
+Verificado contra el código, `apps/api/.env`, `apps/web/.env.local` y los archivos de
+`C:\deploy\` (`api.env.production`, `api.env.yaml`, `web.env.production`), revisando solo si
+cada variable existe o está vacía. Las secciones de más abajo (snapshot del 2026-08-11)
+quedaron en parte superadas: los datos de tienda Vendelo, las llaves Wompi de producción,
+Google OAuth del web y las URLs de producción ya están en `C:\deploy\`.
+
+### Bloqueantes
+
+| # | Pendiente | Detalle |
+|---|---|---|
+| 1 | **Desplegar la API en Cloud Run** | No hay job de deploy (`ci.yml`, TODO). Falta crear el servicio, Artifact Registry y los secretos en Secret Manager, y hacer el primer build/deploy con `apps/api/Dockerfile` (manual con `gcloud` o con un job nuevo de CI). |
+| 2 | **Aplicar la migración pendiente** | `20261015120000_vendelo_oauth_and_city_status` no está aplicada (`prisma migrate status`). Aplicar con `prisma migrate deploy` **antes** de desplegar la API nueva: sin ella falla al leer las columnas nuevas de `Shipment`/`VendeloCity`. |
+| 3 | **Base de datos de desarrollo = producción** | `DATABASE_URL` de `packages/database/.env`, `apps/api/.env`, `apps/web/.env.local` y `C:\deploy\` apuntan a la **misma** base de Neon. El desarrollo local (y los E2E) escriben sobre datos reales. Crear un branch de Neon para desarrollo y usarlo localmente. |
+| 4 | **Conectar web ↔ API con la URL real** | `NEXT_PUBLIC_API_URL`/`API_URL` (Vercel) deben apuntar a la URL definitiva de Cloud Run, y `FRONTEND_URL` (API) al dominio exacto de Vercel (CORS en producción solo acepta ese origen). Se conocen tras el paso 1. |
+| 5 | **Webhook de pagos en Wompi** | Registrar en el panel de Wompi (producción) la URL de eventos `https://<cloud-run>/payments/wompi/webhook`. Sin esto los pedidos pagados quedan en `PENDING`. |
+
+### Importantes (no impiden lanzar)
+
+| Pendiente | Detalle |
+|---|---|
+| `SENTRY_DSN` (API) y `NEXT_PUBLIC_SENTRY_DSN` (web) | Vacías en producción: sin monitoreo de errores. |
+| Google OAuth | El web tiene credenciales; agregar el dominio de producción en las URIs de redirección autorizadas de Google Cloud Console (`<dominio>/api/auth/callback/google`). |
+| `TURNSTILE_SECRET_KEY` (API) | Vacía en `api.env.production`. Solo bloquea el checkout de invitado (503), que de todos modos arranca apagado (`GUEST_CHECKOUT_ENABLED`, default `false`). Necesaria antes de activarlo. |
+| Mercado Pago | `MP_ACCESS_TOKEN`/`MP_WEBHOOK_SECRET` no están en los archivos de producción. Sin impacto mientras `MERCADOPAGO_ENABLED` siga apagado en `/admin/configuracion`. |
+| Catálogo de ciudades | Tras el primer deploy: `POST /admin/vendelo/sync-cities` (guarda cobertura y ciudades suspendidas). |
+
+### Vendelo
+
+Funciona en producción con la API Key actual (`VENDELO_AUTH_MODE` ausente = `apikey`). La
+migración a OAuth no bloquea el lanzamiento: ver `docs/vendelo-activacion.md`. No hay
+webhooks genéricos (el panel solo ofrece Chatby y LucidBot); los estados se sincronizan por
+polling cada 5 min.
+
+### Menores
+
+- `apps/api/.env.example` documenta `JWT_EXPIRES_IN`, pero el código lee `JWT_EXPIRY`
+  (`auth.module.ts`). `api.env.yaml` ya usa el nombre correcto.
+- `apps/web/.next/dev/types/routes.d.ts` local está truncado (rompe `type-check` local de web;
+  no afecta CI ni Vercel). Se regenera con `pnpm --filter @motek/web dev`.
+
+---
+
 Resume qué variables de entorno faltan configurar (o están vacías localmente) para poder
 lanzar Motek Store a producción, separado por plataforma: GitHub, Vercel (`apps/web`) y
 Google Cloud Platform / Cloud Run (`apps/api`).
@@ -78,8 +122,9 @@ WOMPI_PRIVATE_KEY
 WOMPI_EVENTS_SECRET
 WOMPI_INTEGRITY_SECRET
 RESEND_API_KEY
-VENDELO_API_KEY
 VENDELO_WEBHOOK_SECRET
+VENDELO_API_KEY                 # solo si VENDELO_AUTH_MODE=apikey (default)
+VENDELO_TOKEN_ENCRYPTION_KEY    # solo si VENDELO_AUTH_MODE=oauth
 ```
 
 Resto de variables según `apps/api/.env.example` y lo que está vacío localmente:
@@ -100,8 +145,11 @@ Resto de variables según `apps/api/.env.example` y lo que está vacío localmen
 | `NODE_ENV` | ✅ configurada | debe ser `production` en Cloud Run |
 | `PORT` | ✅ configurada | Cloud Run la inyecta automáticamente, no hace falta setearla a mano |
 | `FRONTEND_URL` | ✅ configurada | debe apuntar a la URL pública del web en prod |
-| `VENDELO_API_KEY` | ✅ configurada | |
-| `VENDELO_API_URL` | ✅ configurada | |
+| `VENDELO_AUTH_MODE` | nueva (default `apikey`) | pasar a `oauth` cuando soporte entregue el refresh token — la API Key está deprecada desde 2026-06-12 |
+| `VENDELO_API_KEY` | ✅ configurada | solo modo `apikey` |
+| `VENDELO_TOKEN_ENCRYPTION_KEY` | ❌ **nueva** | solo modo `oauth`; `openssl rand -base64 32`, en Secret Manager |
+| `VENDELO_REFRESH_TOKEN` | ❌ **nueva** | solo primer arranque en modo `oauth` (o usar `scripts/seed-vendelo-refresh-token.ts`); luego rota en la tabla `VendeloCredential` |
+| `VENDELO_API_URL` | ✅ configurada | debe ser `https://api.venndelo.com` (el default anterior `api.vendelo.co` era incorrecto) |
 | `VENDELO_WEBHOOK_SECRET` | ✅ configurada | |
 | `VENDELO_WALLET_ALERT_THRESHOLD` | ✅ configurada (default) | |
 | `VENDELO_STORE_NAME` | ❌ **vacía** | bloquea creación de envíos (pickup_info) |

@@ -21,6 +21,7 @@ electrónico. Los administradores gestionan productos, pedidos y stock desde un 
 8. [Flujo de pago con Mercado Pago](#8-flujo-de-pago-con-mercado-pago)
 9. [Integración de despacho con Vendelo](#9-integración-de-despacho-con-vendelo)
    - [9.1 Pago contra entrega (COD)](#91-pago-contra-entrega-cod)
+   - [9.4 Reglas de negocio de la integración](#94-reglas-de-negocio-de-la-integración)
 10. [Servicios de background (colas y reconciliación)](#10-servicios-de-background-colas-y-reconciliación)
 11. [API NestJS — Referencia completa](#11-api-nestjs--referencia-completa)
 12. [Variables de entorno](#12-variables-de-entorno)
@@ -571,14 +572,23 @@ Si la prueba tiene éxito, el circuito vuelve a `CLOSED`. Si falla, regresa a `O
 
 ### Endpoints de Vendelo utilizados
 
-| Operación | Endpoint | Descripción |
+Base URL `https://api.venndelo.com`. Contrato completo en `API_VENDELO_DOCUMENTACION.md`;
+tipos HTTP en `apps/api/src/infrastructure/services/vendelo-api.types.ts`.
+
+| Operación | Endpoint | Usado por |
 |---|---|---|
-| Autenticación | `POST /auth/token` | Obtiene access token |
-| Catálogo de ciudades | `GET /cities` | Ciudades disponibles con paginación |
-| Crear envío | `POST /shipments` | Crea la orden de despacho |
-| Estado del envío | `GET /shipments/{id}` | Consulta tracking |
-| Sincronizar estado | `PATCH /orders/:id/sync-shipment` | Actualiza estado desde Vendelo |
-| Cotizar envío | `POST /v1/admin/orders/quotation` | Estima el costo de envío sin crear el pedido |
+| Token OAuth | `POST /v1/admin/oauth/token` | `VendeloOAuthTokenProvider` (solo modo `oauth`) |
+| Verificar autenticación | `GET /v1/admin/check-auth` | `GET /admin/vendelo/health` |
+| Catálogo de ciudades | `GET /v1/admin/region/cities` | `POST /admin/vendelo/sync-cities` |
+| Cotizar envío | `POST /v1/admin/orders/quotation` | `QuoteShipping` (carrito/checkout) |
+| Crear pedido | `POST /v1/admin/orders` | `VendeloOrderQueueService` |
+| Consultar pedido | `GET /v1/admin/orders/{id}` | Polling (fallback individual) |
+| Consultar pedidos en lote | `GET /v1/admin/orders?filter[id][$in]=...` | Polling (`VendeloShipmentPollerCron`) |
+| Anular pedido | `POST /v1/admin/orders/{id}/cancel` | `CancelOrder` (admin) |
+| Crear envíos / etiquetas / recogida | `POST /v1/admin/shipping/create-shipments`, `generate-labels`, `request-pickup` | Admin |
+| Novedades | `GET /v1/admin/shipping/exceptions`, `POST .../{id}/resolve` | Admin |
+| Saldo de billetera | `GET /v1/admin/wallet/get-wallet-balance` | `WalletAlertCron` |
+| Webhooks | `/v1/admin/chatbot/connections` | `scripts/register-vendelo-webhook.ts` |
 
 ### Cotización de envío (carrito/checkout)
 
@@ -710,6 +720,68 @@ cuando `shippingTotal > 0`, para que los números siempre cuadren.
 en `Settings` (el toggle traía un significado distinto de un intento anterior) — todo ambiente
 arranca en el default seguro (desactivado) hasta que el admin lo active manualmente.
 
+### 9.4 Reglas de negocio de la integración
+
+Reglas que el código hace cumplir. Las que dependen de identidad o dinero viven en el **dominio**
+(`packages/domain`), para que valgan en cualquier caller (endpoint, cron o script).
+
+**Autenticación con Venndelo**
+
+- `VENDELO_AUTH_MODE=apikey|oauth` (default `apikey`). La API Key (`X-Venndelo-Api-Key`) está
+  deprecada por Venndelo desde el 2026-06-12. OAuth es el destino.
+- En OAuth el **refresh token rota**: vive cifrado (AES-256-GCM, `VENDELO_TOKEN_ENCRYPTION_KEY`) en
+  la tabla `VendeloCredential`, no en una env var. Solo una instancia de Cloud Run refresca a la vez
+  (lease + compare-and-swap) y todas comparten el access token.
+- **Nunca** llamar a `/v1/admin/oauth/token` por fuera de `VendeloOAuthTokenProvider` (scripts
+  incluidos): un refresco paralelo rota el token y deja a la API con uno revocado.
+- Activación paso a paso: [`docs/vendelo-activacion.md`](docs/vendelo-activacion.md).
+
+**Envío de pedidos a Vendelo**
+
+- Un pedido se envía a Vendelo **solo cuando está pagado** (webhook `APPROVED`) o al crearse si es
+  COD. Retiro en tienda (`STORE_PICKUP`) nunca se envía.
+- Montos: el dominio trabaja en **centavos**; Vendelo en **pesos**. La conversión ocurre únicamente
+  en `VendeloService`.
+- Un pedido **anulado mientras espera en cola** no se crea en Vendelo (la fila queda `CANCELLED`).
+
+**Anulación de pedidos (`CancelOrder`)**
+
+- Anular desde el admin pasa siempre por el use case `CancelOrder` (la ruta
+  `apps/web/src/app/api/orders/[id]/status` delega en NestJS). Nunca `updateStatus('CANCELLED')` directo.
+- Si el pedido ya existe en Vendelo, se anula **primero allá**. Si Vendelo lo rechaza, el pedido en
+  Motek **no cambia**: nunca queda anulado aquí y vivo allá.
+- **No se puede anular un pedido ya despachado** (envío `SHIPPED`, `INCIDENT`, `DELIVERED` o
+  `RETURNED`): se gestiona como devolución con Vendelo.
+- Anular un pedido **pagado** repone su stock (una sola vez). Un pedido `PENDING` no, porque nunca
+  se descontó.
+
+**Estado del envío**
+
+| Regla | Detalle |
+|---|---|
+| Nunca retrocede | `SyncShipmentStatus` solo avanza el estado (`PENDING → READY → PREPARING → SHIPPED → DELIVERED`). Eventos duplicados o desordenados son inofensivos. `CANCELLED` se acepta siempre. |
+| Pedido sincronizado | Envío `SHIPPED`/`DELIVERED` → pedido igual; `RETURNED`/`CANCELLED` → pedido `CANCELLED` + restock idempotente. |
+| Devolución en curso ≠ devuelto | El estado de transportadora `RETURN` no marca `RETURNED` (que repone stock): se espera a que Vendelo cierre el pedido como devuelto. |
+| Datos ausentes no borran | Un evento sin guía/transportadora no borra la que ya estaba guardada. |
+| Detalle de seguimiento | Intentos de entrega, estado de la transportadora y fecha de entrega se actualizan aunque el estado no cambie. |
+| Doble canal | Webhook (si la cuenta lo tiene habilitado) + polling cada 5 min en lote (`filter[id][$in]`) como red de seguridad. |
+
+**Cobertura de ciudades**
+
+- El catálogo `VendeloCity` se sincroniza con `POST /admin/vendelo/sync-cities` e incluye el estado
+  del servicio de Vendelo por ciudad.
+- Hacia una ciudad `SUSPENDED` **no se puede cotizar ni crear pedidos** (`QuoteShipping`,
+  `CreateOrder`); el checkout la muestra sin permitir elegirla, con el mensaje de Vendelo.
+- Una ciudad ausente del catálogo local **no bloquea** (el catálogo puede estar vacío o desactualizado).
+
+**Webhook**
+
+- Autenticado con un secreto compartido en `metadata` (Venndelo aún no firma los webhooks); el
+  guard acepta el formato del spec `{ key, value }` y el antiguo.
+- Siempre responde `200` para evitar reintentos masivos. El sobre no está documentado por Venndelo:
+  se normaliza de forma tolerante y la estructura (sin valores) del primer evento de cada tipo queda
+  en logs.
+
 ---
 
 ## 10. Servicios de background (colas y reconciliación)
@@ -755,6 +827,7 @@ Reintentos: 3 intentos con backoff 5 s → 30 s → 120 s.
 3. **Sweeper de huérfanas** — al inicio de cada ciclo, libera (`PROCESSING → PENDING`) filas atascadas por más de 5 min, cubriendo el caso de un contenedor que crashea a mitad de proceso.
 4. **Commit idempotente** — el `update` final de `Order.vendeloOrderId` usa `updateMany({ where: { vendeloOrderId: null } })` en vez de `update` simple.
 5. **`VendeloHttpClient.post()` no reintenta en `5xx`** para `/v1/admin/orders` (parámetro `retryOn5xx: false`) — Vendelo no trata `external_order_id` como key única, así que un retry sobre un 5xx puede crear una orden duplicada si la primera request sí fue procesada. Sigue reintentando en `429` y errores de red.
+6. **Pedidos anulados en cola** — si el pedido pasó a `CANCELLED` mientras esperaba (anulación desde el admin), la fila queda `CANCELLED` y no se llama a Vendelo.
 
 También carga `product: { select: { sku, name } }` al construir el `domainOrder`, para que `VendeloService` envíe el SKU y nombre comerciales reales en `line_items` (antes enviaba el cuid interno de Prisma).
 
@@ -908,12 +981,17 @@ MP_PUBLIC_KEY=TEST-xxx
 MP_WEBHOOK_SECRET=
 
 # ── Vendelo (logística) ────────────────────────────────────────────────────────
-VENDELO_API_URL=https://api.vendelo.co
-VENDELO_API_KEY=
-VENDELO_PICKUP_CITY_CODE=                  # Código de ciudad de despacho (ej. BOG)
-VENDELO_PICKUP_ADDRESS=                    # Dirección del punto de recogida
-VENDELO_PICKUP_CONTACT_NAME=
-VENDELO_PICKUP_CONTACT_PHONE=
+VENDELO_API_URL=https://api.venndelo.com
+VENDELO_AUTH_MODE=apikey                   # apikey (deprecado) | oauth — ver docs/vendelo-activacion.md
+VENDELO_API_KEY=                           # solo modo apikey
+VENDELO_TOKEN_ENCRYPTION_KEY=              # solo modo oauth — openssl rand -base64 32
+VENDELO_REFRESH_TOKEN=                     # solo primer arranque en oauth; luego rota en BD
+VENDELO_WEBHOOK_SECRET=                    # secreto compartido en metadata del webhook
+VENDELO_STORE_NAME=Motek Store             # pickup_info de cada pedido
+VENDELO_STORE_PHONE=
+VENDELO_STORE_ADDRESS=
+VENDELO_STORE_CITY_CODE=                   # DIVIPOLA 8 dígitos (ej. 68001000 Bucaramanga)
+VENDELO_STORE_SUBDIVISION_CODE=            # 2 dígitos (ej. 68 Santander)
 
 # ── Email (Resend) ─────────────────────────────────────────────────────────────
 RESEND_API_KEY=re_xxx
