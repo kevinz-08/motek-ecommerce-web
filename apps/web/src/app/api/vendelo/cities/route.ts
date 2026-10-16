@@ -10,7 +10,15 @@ export async function GET(req: NextRequest) {
 
   const cities = await prisma.vendeloCity.findMany({
     where: { name: { contains: q, mode: 'insensitive' } },
-    select: { code: true, name: true, subdivisionCode: true },
+    // serviceStatus: el selector muestra las ciudades suspendidas por Vendelo
+    // sin permitir elegirlas (CreateOrder también las rechaza en el dominio)
+    select: {
+      code: true,
+      name: true,
+      subdivisionCode: true,
+      serviceStatus: true,
+      serviceUnavailableMessage: true,
+    },
     orderBy: { name: 'asc' },
     take: 10,
   })

@@ -45,6 +45,20 @@ const SHIPMENT_STATUS_LABEL: Record<string, string> = {
   CANCELLED: 'Cancelado',
 }
 
+/** Estado fino reportado por la transportadora (Shipment.trackingStatus). */
+const TRACKING_STATUS_LABEL: Record<string, string> = {
+  'IN-ORIGIN': 'En la ciudad de origen',
+  'IN-DESTINATION': 'En la ciudad de destino',
+  'OUT-FOR-DELIVERY': 'En reparto para entrega',
+  'DELIVERED': 'Entregado al destinatario',
+  'RETURN': 'En devolución al remitente',
+  'TRANSIT': 'En tránsito',
+  'PENDING': 'Pendiente de recogida',
+  'READY': 'Listo para despacho',
+  'INCIDENT': 'Con novedad en la entrega',
+  'AT-COLLECTION-POINT': 'Disponible en punto de recogida',
+}
+
 function formatCOP(cents: number) {
   return new Intl.NumberFormat('es-CO', {
     style: 'currency',
@@ -118,7 +132,17 @@ export default async function SeguimientoPage({ searchParams }: PageProps) {
           product: { select: { name: true, slug: true } },
         },
       },
-      shipment: { select: { status: true, trackingNumber: true, carrier: true } },
+      shipment: {
+        select: {
+          status: true,
+          trackingNumber: true,
+          carrier: true,
+          trackingStatus: true,
+          deliveryAttempts: true,
+          deliveredAt: true,
+          trackingUpdatedAt: true,
+        },
+      },
     },
   })
 
@@ -170,6 +194,22 @@ export default async function SeguimientoPage({ searchParams }: PageProps) {
                 <p className="text-sm text-gray-600 mt-1">
                   Guía <span className="font-mono font-semibold">{order.shipment.trackingNumber}</span>
                   {order.shipment.carrier ? ` · ${order.shipment.carrier}` : ''}
+                </p>
+              )}
+              {order.shipment.trackingStatus && TRACKING_STATUS_LABEL[order.shipment.trackingStatus] && (
+                <p className="text-sm text-gray-600 mt-1">
+                  {TRACKING_STATUS_LABEL[order.shipment.trackingStatus]}
+                  {order.shipment.trackingUpdatedAt ? ` · ${formatDate(order.shipment.trackingUpdatedAt)}` : ''}
+                </p>
+              )}
+              {order.shipment.deliveredAt && (
+                <p className="text-sm text-gray-600 mt-1">
+                  Entregado el {formatDate(order.shipment.deliveredAt)}
+                </p>
+              )}
+              {!order.shipment.deliveredAt && (order.shipment.deliveryAttempts ?? 0) > 0 && (
+                <p className="text-sm text-gray-600 mt-1">
+                  Intentos de entrega: {order.shipment.deliveryAttempts}
                 </p>
               )}
             </div>

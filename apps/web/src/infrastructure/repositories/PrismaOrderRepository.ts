@@ -408,6 +408,14 @@ export class PrismaOrderRepository implements IOrderRepository {
     return rows.map((r) => ({ id: r.id, vendeloOrderId: r.vendeloOrderId }))
   }
 
+  async findIdByVendeloOrderId(vendeloOrderId: string): Promise<string | null> {
+    const row = await prisma.order.findFirst({
+      where: { vendeloOrderId },
+      select: { id: true },
+    })
+    return row?.id ?? null
+  }
+
   /** Busca un pedido por su token de seguimiento — ver IOrderRepository.findByTrackingToken. */
   async findByTrackingToken(token: string): Promise<Order | null> {
     const o = await prisma.order.findUnique({
