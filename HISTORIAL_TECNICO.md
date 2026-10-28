@@ -812,3 +812,16 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `docs/despliegue-produccion.md` — región de Cloud Scheduler, cabeceras/cuerpo de las tareas, aviso del 411 de curl sin cuerpo, `VENDELO_POLL_ENABLED` y URL de producción.
 
 **Verificación:** `GET /health` → `{"status":"ok","db":"ok"}`. `POST /internal/jobs/*` responde 401 sin secreto o con secreto incorrecto y 200 con el correcto (`emails`, `vendelo-orders`, `vendelo-wallet` autenticó contra Venndelo vía OAuth desde Cloud Run, `shipments` con polling activo). Cloud Scheduler disparó `motek-emails` y la API registró `200` con user agent `Google-Cloud-Scheduler`. Logs del arranque sin errores.
+
+---
+
+## 2026-10-28 — Variables de producción en Vercel y redespliegue de la web
+
+**Problema/Motivo:** El despliegue de producción de `www.tiendamotek.com` tenía 13 días y se había construido sin la URL de la API: el código del navegador apuntaba a `http://localhost:3001` (panel admin, recuperar contraseña y verificar email rotos para los visitantes). Además faltaban en Vercel (Production) `GOOGLE_CLIENT_ID/SECRET`, `AUTH_SECRET`, `RESEND_API_KEY/FROM_EMAIL` y `NEXT_PUBLIC_TURNSTILE_SITE_KEY`.
+
+**Cambios:**
+
+- Infraestructura (fuera del repo): 19 variables de `C:\deploy\web.env.production` cargadas en Vercel (Production) con `vercel env add --force`; los secretos marcados como *Sensitive*. `NEXT_PUBLIC_SENTRY_DSN` omitida (vacía).
+- Redespliegue de producción (`vercel redeploy --target production`) del commit actual de `main`, construido por Vercel desde GitHub. (`vercel deploy --prod` desde el equipo local falla: sube 636 MB y excede el límite de 100 MB por archivo; el proyecto despliega vía integración con GitHub.)
+
+**Verificación:** el nuevo despliegue quedó `Ready` con alias `www.tiendamotek.com` y `tiendamotek.com`. El JavaScript servido referencia `https://motek-api-995699039803.us-east5.run.app` y ya no `localhost:3001`. Páginas `/`, `/catalogo`, `/carrito`, `/checkout`, `/auth/login`, `/pedidos/seguimiento` responden 200; `/api/shipping/quote` valida y responde. Variables no sensibles comparadas contra el archivo de deploy: coinciden.
