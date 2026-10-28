@@ -1,0 +1,14 @@
+# Build de la imagen de la API (apps/api/Dockerfile) en Cloud Build.
+# No requiere Docker local. Ver docs/despliegue-produccion.md.
+#
+#   gcloud builds submit --config cloudbuild.api.yaml \
+#     --substitutions=_IMAGE=us-east5-docker.pkg.dev/motek-app-web/motek/motek-api:<tag> .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'apps/api/Dockerfile', '-t', '${_IMAGE}', '.']
+images:
+  - '${_IMAGE}'
+substitutions:
+  _IMAGE: us-east5-docker.pkg.dev/motek-app-web/motek/motek-api:latest
+options:
+  logging: CLOUD_LOGGING_ONLY

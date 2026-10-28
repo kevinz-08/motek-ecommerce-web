@@ -738,3 +738,49 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/web/public/assets/heroBanners/hero_banner_slide{1,2,3,4}.jpeg` — eliminadas.
 
 **Verificación:** búsqueda de `heroBanners/` y `hero_banner_slide` en `apps/web/src`, `next.config.ts` y `packages`: sin referencias.
+
+---
+
+## 2026-10-28 — Preparación del despliegue a producción
+
+**Problema/Motivo:** Primer lanzamiento: la API nunca se desplegó en Cloud Run (no hay job de deploy), la base de datos actual pasará a ser producción y contiene pedidos de prueba.
+
+**Cambios:**
+
+- `packages/database/prisma/limpiar-pedidos-prueba.ts` — script que borra los pedidos de prueba (colas, pagos, pedidos con ítems y envíos, invitados huérfanos) en una transacción. Por defecto es una simulación; borra solo con `--confirmar`. Informa el stock descontado por pedidos pagados (no lo repone) y los pedidos que también existen en Vendelo. Nunca imprime emails completos.
+- `cloudbuild.api.yaml` — build de la imagen de la API en Cloud Build con `apps/api/Dockerfile` (no requiere Docker local).
+- `.gcloudignore` — hereda `.gitignore` (excluye `.env*`) y deja fuera web, docs y CI del upload.
+- `docs/despliegue-produccion.md` — guía por fases (Neon, Cloud Run, Vercel, integraciones, pruebas). Documenta que Cloud Run necesita `--min-instances=1 --no-cpu-throttling` porque las colas y el polling corren con `setInterval`.
+
+**Verificación:** el script compila con `tsc` contra el cliente Prisma generado. El resto se valida durante el despliegue.
+
+---
+
+## 2026-10-28 — Tareas en segundo plano disparadas por Cloud Scheduler (escala a cero)
+
+**Problema/Motivo:** Las seis tareas en segundo plano (colas de Vendelo y correos, polling de envíos, reconciliación de Wompi, limpieza de pedidos vencidos y alerta de saldo Vendelo) corrían con `setInterval` dentro del proceso. En Cloud Run eso obligaba a mantener una instancia siempre encendida con CPU permanente (≈ USD 45–55/mes). Con Cloud Scheduler la API puede escalar a cero. Reemplaza la indicación `--min-instances=1 --no-cpu-throttling` de la entrada anterior.
+
+**Cambios:**
+
+- `apps/api/src/jobs/background-jobs.config.ts` — `BACKGROUND_JOBS_MODE=interval|scheduler` (default `interval`: en desarrollo nada cambia).
+- `apps/api/src/jobs/jobs.controller.ts`, `jobs.module.ts`, `cron-secret.guard.ts` — `POST /internal/jobs/:job` (`vendelo-orders`, `emails`, `shipments`, `wompi-reconcile`, `expired-orders`, `vendelo-wallet`), protegido con la cabecera `x-cron-secret` (fail-closed sin `CRON_SECRET`). Responde cuando la tarea termina; 500 si falla para que Cloud Scheduler lo registre. Respeta `VENDELO_POLL_ENABLED`.
+- `EmailQueueService`, `VendeloOrderQueueService`, `WompiReconciliationService`, `ExpiredOrdersCleanupService`, `VendeloShipmentPollerCron`, `WalletAlertCron` — no programan timers en modo `scheduler`. El poller expone `isEnabled()`.
+- `infrastructure.module.ts`, `vendelo.module.ts`, `app.module.ts` — exportan los servicios que usa `JobsModule` (mismas instancias, sin duplicar timers) y lo registran.
+- `apps/api/src/main.ts` — exige `CRON_SECRET` en modo `scheduler` y valida el valor del modo.
+- `apps/api/.env.example`, `docs/despliegue-produccion.md` (deploy con `--min-instances=0` y comandos de Cloud Scheduler), `CLAUDE.md` (patrón para tareas nuevas).
+- Fuera del repo: `C:\deploy\api.env.yaml` (`BACKGROUND_JOBS_MODE: "scheduler"`) y `C:\deploy\api.env.production` (`CRON_SECRET` generado al azar).
+
+**Verificación:** `jobs.test.ts` (guard, despacho de cada tarea, 404, 500, kill switch del polling, modo por defecto y servicios sin timer en modo scheduler) y `jobs.module.test.ts` (Nest resuelve `JobsController` con las instancias exportadas; se comprobó que falla si se quita un export). `pnpm --filter @motek/api test` → 302/302; type-check y build OK.
+
+---
+
+## 2026-10-28 — Rama de desarrollo en Neon y limpieza de datos de prueba ensayada
+
+**Problema/Motivo:** Desarrollo y producción compartían la misma base de Neon. Antes de limpiar producción había que validar la migración pendiente y el script de limpieza sobre una copia. La simulación mostró que el cliente de prueba de `prisma/seed.ts` (`cliente@ejemplo.co`, contraseña escrita en el repo) también existe en la base y sería una cuenta con credenciales públicas en producción.
+
+**Cambios:**
+
+- `packages/database/prisma/limpiar-pedidos-prueba.ts` — también borra el cliente de prueba del seed (solo rol `CUSTOMER` y solo si ya no tiene pedidos); el aviso de stock aclara que los pedidos creados por el seed no descontaron unidades.
+- Fuera del repo: `packages/database/.env`, `apps/api/.env` y `apps/web/.env.local` apuntan a la rama `dev` de Neon (valores anteriores respaldados en `*.bak-prod`, ignorados por git).
+
+**Verificación:** En la rama `dev` (copia de producción): `prisma migrate deploy` aplicó `20261015120000_vendelo_oauth_and_city_status` sin errores; la simulación listó 8 pedidos de prueba (todos `@ejemplo.co`, ninguno en Vendelo) y 1 usuario de prueba; el borrado real eliminó 8 pedidos, 8 pagos y 1 usuario, y una segunda pasada no encontró nada. Pendiente de seguridad: `prisma/seed.ts` también fija la contraseña del admin (`motekdev@gmail.com`); cambiarla en producción y no ejecutar nunca `pnpm db:seed` contra producción.
