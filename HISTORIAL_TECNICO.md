@@ -784,3 +784,17 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Fuera del repo: `packages/database/.env`, `apps/api/.env` y `apps/web/.env.local` apuntan a la rama `dev` de Neon (valores anteriores respaldados en `*.bak-prod`, ignorados por git).
 
 **Verificación:** En la rama `dev` (copia de producción): `prisma migrate deploy` aplicó `20261015120000_vendelo_oauth_and_city_status` sin errores; la simulación listó 8 pedidos de prueba (todos `@ejemplo.co`, ninguno en Vendelo) y 1 usuario de prueba; el borrado real eliminó 8 pedidos, 8 pagos y 1 usuario, y una segunda pasada no encontró nada. Pendiente de seguridad: `prisma/seed.ts` también fija la contraseña del admin (`motekdev@gmail.com`); cambiarla en producción y no ejecutar nunca `pnpm db:seed` contra producción.
+
+---
+
+## 2026-10-28 — Prisma CLI apuntaba a producción y `tsx` faltaba en la API
+
+**Problema/Motivo:** `prisma.config.ts` cargaba `apps/web/.env` antes que `packages/database/.env`. Un `apps/web/.env` heredado seguía apuntando a producción, así que `prisma migrate deploy` corrió contra producción durante lo que debía ser el ensayo en la rama `dev` (la migración `20261015120000_vendelo_oauth_and_city_status` quedó aplicada en producción antes de lo previsto; solo agrega columnas e índices, sin pérdida de datos). Los scripts con `dotenv/config` sí usaban `dev`, por eso la limpieza no se vio afectada. Aparte, los scripts de `apps/api/scripts/` se documentaron con `pnpm exec tsx`, pero `tsx` no era dependencia de `@motek/api`.
+
+**Cambios:**
+
+- `packages/database/prisma.config.ts` — el `.env` del paquete se carga primero, así Prisma CLI y los scripts de `prisma/` usan siempre la misma base. Una `DATABASE_URL` pasada en el entorno sigue ganando sobre todos.
+- `apps/api/package.json`, `pnpm-lock.yaml` — `tsx@^4.21.0` como devDependency (misma versión que `@motek/database`).
+- Fuera del repo: `apps/web/.env` también apunta a `dev` (respaldo en `apps/web/.env.bak-prod`).
+
+**Verificación:** `prisma migrate deploy` ahora reporta el host de la rama `dev` (`ep-winter-wind…`) y le aplicó la migración, que no tenía; en producción `migrate deploy` informa que no hay pendientes. `pnpm exec tsx --version` funciona en `apps/api`.
