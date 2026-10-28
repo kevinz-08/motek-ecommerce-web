@@ -124,6 +124,20 @@ import { CACHE_TAGS } from '@/lib/cache'
 // Tags: products | categories | home | catalog
 ```
 
+## Background Jobs (Cloud Scheduler)
+
+Las colas (Vendelo, correos), el polling de envíos, la reconciliación de Wompi, la limpieza de
+pedidos vencidos y la alerta de saldo Vendelo tienen dos modos (`BACKGROUND_JOBS_MODE`):
+
+- `interval` (default, desarrollo): cada servicio programa su `setInterval` en `onModuleInit`.
+- `scheduler` (producción, Cloud Run con escala a cero): no hay timers; Cloud Scheduler dispara
+  `POST /internal/jobs/:job` (`apps/api/src/jobs/`) con la cabecera `x-cron-secret` (`CRON_SECRET`).
+  El endpoint espera a que la tarea termine, porque Cloud Run solo da CPU durante peticiones.
+
+Una tarea nueva en segundo plano debe: respetar `intervalJobsEnabled()` en su `onModuleInit`,
+agregarse a `JOB_NAMES` en `jobs.controller.ts` y a la tabla de `docs/despliegue-produccion.md`.
+Debe ser segura ante disparos concurrentes (claims atómicos / idempotencia).
+
 ## Startup Validation
 
 `apps/api/src/main.ts` calls `assertEnvVars()` on bootstrap. If any of `DATABASE_URL`, `JWT_SECRET`, `INTERNAL_API_SECRET`, `WOMPI_EVENTS_SECRET`, or `WOMPI_INTEGRITY_SECRET` are missing, the process exits with code 1. Do not remove this check.

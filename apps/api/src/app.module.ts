@@ -14,6 +14,7 @@ import { VendeloModule } from './vendelo/vendelo.module'
 import { ShippingModule } from './shipping/shipping.module'
 import { CouponsModule } from './coupons/coupons.module'
 import { ContactModule } from './contact/contact.module'
+import { JobsModule } from './jobs/jobs.module'
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard'
 import { RolesGuard } from './auth/guards/roles.guard'
 
@@ -41,6 +42,7 @@ import { RolesGuard } from './auth/guards/roles.guard'
     ShippingModule,
     CouponsModule,
     ContactModule,
+    JobsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

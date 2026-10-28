@@ -66,6 +66,16 @@ function assertEnvVars(): void {
     process.exit(1)
   }
 
+  // Tareas en segundo plano disparadas por Cloud Scheduler: sin CRON_SECRET el
+  // endpoint /internal/jobs rechaza todo y las colas no avanzarían nunca.
+  const jobsMode = (process.env['BACKGROUND_JOBS_MODE'] ?? 'interval').trim().toLowerCase()
+  if (jobsMode === 'scheduler') {
+    required.push('CRON_SECRET')
+  } else if (jobsMode !== 'interval') {
+    console.error(`[Bootstrap] BACKGROUND_JOBS_MODE inválido: "${jobsMode}" (valores: interval | scheduler)`)
+    process.exit(1)
+  }
+
   const missing = required.filter((k) => !process.env[k])
   if (missing.length > 0) {
     console.error(`[Bootstrap] Variables de entorno requeridas no configuradas: ${missing.join(', ')}`)

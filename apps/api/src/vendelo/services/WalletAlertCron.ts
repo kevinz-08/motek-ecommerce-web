@@ -2,6 +2,7 @@ import { Injectable, Logger, Inject, OnModuleInit, OnModuleDestroy } from '@nest
 import type { IAlertNotificationPort } from '@motek/domain'
 import { VendeloService } from '../../infrastructure/services/VendeloService'
 import { ALERT_NOTIFICATION_PORT } from '../../infrastructure/injection-tokens'
+import { intervalJobsEnabled } from '../../jobs/background-jobs.config'
 
 /** Intervalo de chequeo: una vez al día (24 horas) */
 const CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000
@@ -18,6 +19,8 @@ export class WalletAlertCron implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    // Con BACKGROUND_JOBS_MODE=scheduler la dispara Cloud Scheduler (jobs/jobs.controller.ts)
+    if (!intervalJobsEnabled()) return
     // Ejecutar al inicio para detectar problemas al arrancar el servicio
     this.checkWalletBalance().catch((e) =>
       this.logger.error(`[WalletAlertCron] Error en chequeo inicial: ${e}`),

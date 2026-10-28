@@ -97,6 +97,9 @@ import { ExpiredOrdersCleanupService } from './services/ExpiredOrdersCleanupServ
     VendeloHttpClient,
     VendeloService,
     VendeloOrderQueueService,
+    // Disparados por Cloud Scheduler vía JobsModule (BACKGROUND_JOBS_MODE=scheduler)
+    WompiReconciliationService,
+    ExpiredOrdersCleanupService,
   ],
 })
 export class InfrastructureModule {}

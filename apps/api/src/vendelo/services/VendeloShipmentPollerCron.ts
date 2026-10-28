@@ -21,6 +21,7 @@ import {
   VENDELO_SHIPPING_PORT,
 } from '../../infrastructure/injection-tokens'
 import { VendeloHttpClient } from '../../infrastructure/services/VendeloHttpClient'
+import { intervalJobsEnabled } from '../../jobs/background-jobs.config'
 
 /**
  * Cron de polling que sincroniza el estado de envíos activos contra Vendelo.
@@ -80,6 +81,8 @@ export class VendeloShipmentPollerCron implements OnModuleInit, OnModuleDestroy 
   }
 
   onModuleInit(): void {
+    // Con BACKGROUND_JOBS_MODE=scheduler la dispara Cloud Scheduler (jobs/jobs.controller.ts)
+    if (!intervalJobsEnabled()) return
     if (!this.enabled) {
       this.logger.warn('[VendeloShipmentPoller] Deshabilitado por VENDELO_POLL_ENABLED=false')
       return
@@ -97,6 +100,11 @@ export class VendeloShipmentPollerCron implements OnModuleInit, OnModuleDestroy 
 
   onModuleDestroy(): void {
     if (this.timer) clearInterval(this.timer)
+  }
+
+  /** Kill switch VENDELO_POLL_ENABLED — también lo respeta el disparo desde Cloud Scheduler. */
+  isEnabled(): boolean {
+    return this.enabled
   }
 
   /**
