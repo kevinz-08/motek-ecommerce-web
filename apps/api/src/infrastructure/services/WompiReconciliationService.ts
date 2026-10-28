@@ -3,6 +3,7 @@ import { ConfirmPayment, IOrderRepository } from '@motek/domain'
 import { ORDER_REPOSITORY } from '../injection-tokens'
 import { WompiService } from './WompiService'
 import { PrismaService } from '../database/prisma.service'
+import { intervalJobsEnabled } from '../../jobs/background-jobs.config'
 
 /** Intervalo entre cada ciclo de reconciliación: 15 minutos */
 const RECONCILE_INTERVAL_MS = 15 * 60 * 1000
@@ -38,6 +39,8 @@ export class WompiReconciliationService implements OnModuleInit, OnModuleDestroy
   ) {}
 
   onModuleInit(): void {
+    // Con BACKGROUND_JOBS_MODE=scheduler la dispara Cloud Scheduler (jobs/jobs.controller.ts)
+    if (!intervalJobsEnabled()) return
     this.timer = setInterval(() => {
       this.reconcile().catch((e) =>
         this.logger.error(`Error en ciclo de reconciliación: ${e}`),

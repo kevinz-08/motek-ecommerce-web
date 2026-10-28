@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common'
 import { PrismaService } from '../database/prisma.service'
 import { VendeloService } from './VendeloService'
+import { intervalJobsEnabled } from '../../jobs/background-jobs.config'
 
 const PROCESS_INTERVAL_MS = 2 * 60 * 1000 // cada 2 minutos
 const MAX_ATTEMPTS = 3
@@ -18,6 +19,8 @@ export class VendeloOrderQueueService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
+    // Con BACKGROUND_JOBS_MODE=scheduler la dispara Cloud Scheduler (jobs/jobs.controller.ts)
+    if (!intervalJobsEnabled()) return
     this.timer = setInterval(() => {
       this.processNext().catch((e) => this.logger.error(`[VendeloOrderQueue] Error en procesamiento: ${e}`))
     }, PROCESS_INTERVAL_MS)

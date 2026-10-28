@@ -738,3 +738,90 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/web/public/assets/heroBanners/hero_banner_slide{1,2,3,4}.jpeg` — eliminadas.
 
 **Verificación:** búsqueda de `heroBanners/` y `hero_banner_slide` en `apps/web/src`, `next.config.ts` y `packages`: sin referencias.
+
+---
+
+## 2026-10-28 — Preparación del despliegue a producción
+
+**Problema/Motivo:** Primer lanzamiento: la API nunca se desplegó en Cloud Run (no hay job de deploy), la base de datos actual pasará a ser producción y contiene pedidos de prueba.
+
+**Cambios:**
+
+- `packages/database/prisma/limpiar-pedidos-prueba.ts` — script que borra los pedidos de prueba (colas, pagos, pedidos con ítems y envíos, invitados huérfanos) en una transacción. Por defecto es una simulación; borra solo con `--confirmar`. Informa el stock descontado por pedidos pagados (no lo repone) y los pedidos que también existen en Vendelo. Nunca imprime emails completos.
+- `cloudbuild.api.yaml` — build de la imagen de la API en Cloud Build con `apps/api/Dockerfile` (no requiere Docker local).
+- `.gcloudignore` — hereda `.gitignore` (excluye `.env*`) y deja fuera web, docs y CI del upload.
+- `docs/despliegue-produccion.md` — guía por fases (Neon, Cloud Run, Vercel, integraciones, pruebas). Documenta que Cloud Run necesita `--min-instances=1 --no-cpu-throttling` porque las colas y el polling corren con `setInterval`.
+
+**Verificación:** el script compila con `tsc` contra el cliente Prisma generado. El resto se valida durante el despliegue.
+
+---
+
+## 2026-10-28 — Tareas en segundo plano disparadas por Cloud Scheduler (escala a cero)
+
+**Problema/Motivo:** Las seis tareas en segundo plano (colas de Vendelo y correos, polling de envíos, reconciliación de Wompi, limpieza de pedidos vencidos y alerta de saldo Vendelo) corrían con `setInterval` dentro del proceso. En Cloud Run eso obligaba a mantener una instancia siempre encendida con CPU permanente (≈ USD 45–55/mes). Con Cloud Scheduler la API puede escalar a cero. Reemplaza la indicación `--min-instances=1 --no-cpu-throttling` de la entrada anterior.
+
+**Cambios:**
+
+- `apps/api/src/jobs/background-jobs.config.ts` — `BACKGROUND_JOBS_MODE=interval|scheduler` (default `interval`: en desarrollo nada cambia).
+- `apps/api/src/jobs/jobs.controller.ts`, `jobs.module.ts`, `cron-secret.guard.ts` — `POST /internal/jobs/:job` (`vendelo-orders`, `emails`, `shipments`, `wompi-reconcile`, `expired-orders`, `vendelo-wallet`), protegido con la cabecera `x-cron-secret` (fail-closed sin `CRON_SECRET`). Responde cuando la tarea termina; 500 si falla para que Cloud Scheduler lo registre. Respeta `VENDELO_POLL_ENABLED`.
+- `EmailQueueService`, `VendeloOrderQueueService`, `WompiReconciliationService`, `ExpiredOrdersCleanupService`, `VendeloShipmentPollerCron`, `WalletAlertCron` — no programan timers en modo `scheduler`. El poller expone `isEnabled()`.
+- `infrastructure.module.ts`, `vendelo.module.ts`, `app.module.ts` — exportan los servicios que usa `JobsModule` (mismas instancias, sin duplicar timers) y lo registran.
+- `apps/api/src/main.ts` — exige `CRON_SECRET` en modo `scheduler` y valida el valor del modo.
+- `apps/api/.env.example`, `docs/despliegue-produccion.md` (deploy con `--min-instances=0` y comandos de Cloud Scheduler), `CLAUDE.md` (patrón para tareas nuevas).
+- Fuera del repo: `C:\deploy\api.env.yaml` (`BACKGROUND_JOBS_MODE: "scheduler"`) y `C:\deploy\api.env.production` (`CRON_SECRET` generado al azar).
+
+**Verificación:** `jobs.test.ts` (guard, despacho de cada tarea, 404, 500, kill switch del polling, modo por defecto y servicios sin timer en modo scheduler) y `jobs.module.test.ts` (Nest resuelve `JobsController` con las instancias exportadas; se comprobó que falla si se quita un export). `pnpm --filter @motek/api test` → 302/302; type-check y build OK.
+
+---
+
+## 2026-10-28 — Rama de desarrollo en Neon y limpieza de datos de prueba ensayada
+
+**Problema/Motivo:** Desarrollo y producción compartían la misma base de Neon. Antes de limpiar producción había que validar la migración pendiente y el script de limpieza sobre una copia. La simulación mostró que el cliente de prueba de `prisma/seed.ts` (`cliente@ejemplo.co`, contraseña escrita en el repo) también existe en la base y sería una cuenta con credenciales públicas en producción.
+
+**Cambios:**
+
+- `packages/database/prisma/limpiar-pedidos-prueba.ts` — también borra el cliente de prueba del seed (solo rol `CUSTOMER` y solo si ya no tiene pedidos); el aviso de stock aclara que los pedidos creados por el seed no descontaron unidades.
+- Fuera del repo: `packages/database/.env`, `apps/api/.env` y `apps/web/.env.local` apuntan a la rama `dev` de Neon (valores anteriores respaldados en `*.bak-prod`, ignorados por git).
+
+**Verificación:** En la rama `dev` (copia de producción): `prisma migrate deploy` aplicó `20261015120000_vendelo_oauth_and_city_status` sin errores; la simulación listó 8 pedidos de prueba (todos `@ejemplo.co`, ninguno en Vendelo) y 1 usuario de prueba; el borrado real eliminó 8 pedidos, 8 pagos y 1 usuario, y una segunda pasada no encontró nada. Pendiente de seguridad: `prisma/seed.ts` también fija la contraseña del admin (`motekdev@gmail.com`); cambiarla en producción y no ejecutar nunca `pnpm db:seed` contra producción.
+
+---
+
+## 2026-10-28 — Prisma CLI apuntaba a producción y `tsx` faltaba en la API
+
+**Problema/Motivo:** `prisma.config.ts` cargaba `apps/web/.env` antes que `packages/database/.env`. Un `apps/web/.env` heredado seguía apuntando a producción, así que `prisma migrate deploy` corrió contra producción durante lo que debía ser el ensayo en la rama `dev` (la migración `20261015120000_vendelo_oauth_and_city_status` quedó aplicada en producción antes de lo previsto; solo agrega columnas e índices, sin pérdida de datos). Los scripts con `dotenv/config` sí usaban `dev`, por eso la limpieza no se vio afectada. Aparte, los scripts de `apps/api/scripts/` se documentaron con `pnpm exec tsx`, pero `tsx` no era dependencia de `@motek/api`.
+
+**Cambios:**
+
+- `packages/database/prisma.config.ts` — el `.env` del paquete se carga primero, así Prisma CLI y los scripts de `prisma/` usan siempre la misma base. Una `DATABASE_URL` pasada en el entorno sigue ganando sobre todos.
+- `apps/api/package.json`, `pnpm-lock.yaml` — `tsx@^4.21.0` como devDependency (misma versión que `@motek/database`).
+- Fuera del repo: `apps/web/.env` también apunta a `dev` (respaldo en `apps/web/.env.bak-prod`).
+
+**Verificación:** `prisma migrate deploy` ahora reporta el host de la rama `dev` (`ep-winter-wind…`) y le aplicó la migración, que no tenía; en producción `migrate deploy` informa que no hay pendientes. `pnpm exec tsx --version` funciona en `apps/api`.
+
+---
+
+## 2026-10-28 — Primer despliegue de la API en Cloud Run
+
+**Problema/Motivo:** Lanzamiento a producción.
+
+**Cambios:**
+
+- Infraestructura (fuera del repo): servicio `motek-api` en Cloud Run (`motek-app-web`, `us-east5`, escala a cero, imagen `motek-api:fadef34`), 12 secretos en Secret Manager, 6 tareas en Cloud Scheduler (`us-east1`, el servicio no existe en `us-east5`). Vendelo en modo OAuth: refresh token cargado y rotado en `VendeloCredential`. Producción limpia de pedidos de prueba y del cliente del seed.
+- `C:\deploy\api.env.yaml`: `VENDELO_POLL_ENABLED` pasa a `"true"` (estaba en `false`, lo que dejaba sin sincronizar los estados de envío). `C:\deploy\web.env.production`: `API_URL`/`NEXT_PUBLIC_API_URL` con la URL de Cloud Run.
+- `docs/despliegue-produccion.md` — región de Cloud Scheduler, cabeceras/cuerpo de las tareas, aviso del 411 de curl sin cuerpo, `VENDELO_POLL_ENABLED` y URL de producción.
+
+**Verificación:** `GET /health` → `{"status":"ok","db":"ok"}`. `POST /internal/jobs/*` responde 401 sin secreto o con secreto incorrecto y 200 con el correcto (`emails`, `vendelo-orders`, `vendelo-wallet` autenticó contra Venndelo vía OAuth desde Cloud Run, `shipments` con polling activo). Cloud Scheduler disparó `motek-emails` y la API registró `200` con user agent `Google-Cloud-Scheduler`. Logs del arranque sin errores.
+
+---
+
+## 2026-10-28 — Variables de producción en Vercel y redespliegue de la web
+
+**Problema/Motivo:** El despliegue de producción de `www.tiendamotek.com` tenía 13 días y se había construido sin la URL de la API: el código del navegador apuntaba a `http://localhost:3001` (panel admin, recuperar contraseña y verificar email rotos para los visitantes). Además faltaban en Vercel (Production) `GOOGLE_CLIENT_ID/SECRET`, `AUTH_SECRET`, `RESEND_API_KEY/FROM_EMAIL` y `NEXT_PUBLIC_TURNSTILE_SITE_KEY`.
+
+**Cambios:**
+
+- Infraestructura (fuera del repo): 19 variables de `C:\deploy\web.env.production` cargadas en Vercel (Production) con `vercel env add --force`; los secretos marcados como *Sensitive*. `NEXT_PUBLIC_SENTRY_DSN` omitida (vacía).
+- Redespliegue de producción (`vercel redeploy --target production`) del commit actual de `main`, construido por Vercel desde GitHub. (`vercel deploy --prod` desde el equipo local falla: sube 636 MB y excede el límite de 100 MB por archivo; el proyecto despliega vía integración con GitHub.)
+
+**Verificación:** el nuevo despliegue quedó `Ready` con alias `www.tiendamotek.com` y `tiendamotek.com`. El JavaScript servido referencia `https://motek-api-995699039803.us-east5.run.app` y ya no `localhost:3001`. Páginas `/`, `/catalogo`, `/carrito`, `/checkout`, `/auth/login`, `/pedidos/seguimiento` responden 200; `/api/shipping/quote` valida y responde. Variables no sensibles comparadas contra el archivo de deploy: coinciden.

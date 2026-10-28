@@ -1,0 +1,10 @@
+# Lo que `gcloud builds submit` NO sube a Cloud Build.
+# Hereda .gitignore (excluye .env*, node_modules, clientes generados, builds).
+#!include:.gitignore
+
+# El build de la API no usa la web, la documentación ni el CI
+.git/
+.github/
+apps/web/
+docs/
+*.md

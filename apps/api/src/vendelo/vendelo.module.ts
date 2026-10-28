@@ -33,6 +33,7 @@ import type { IRecipientTrustStrategy } from '@motek/domain'
     },
     RecipientTrustEvaluator,
   ],
-  exports: [RecipientTrustEvaluator],
+  // Poller y alerta de saldo: también los dispara JobsModule (Cloud Scheduler)
+  exports: [RecipientTrustEvaluator, VendeloShipmentPollerCron, WalletAlertCron],
 })
 export class VendeloModule {}

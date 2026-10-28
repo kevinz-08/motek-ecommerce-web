@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common'
 import { PrismaService } from '../database/prisma.service'
+import { intervalJobsEnabled } from '../../jobs/background-jobs.config'
 
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000 // cada hora
 const EXPIRY_HOURS = 2
@@ -12,6 +13,8 @@ export class ExpiredOrdersCleanupService implements OnModuleInit, OnModuleDestro
   constructor(private readonly prisma: PrismaService) {}
 
   onModuleInit(): void {
+    // Con BACKGROUND_JOBS_MODE=scheduler la dispara Cloud Scheduler (jobs/jobs.controller.ts)
+    if (!intervalJobsEnabled()) return
     this.timer = setInterval(() => {
       this.cancelExpiredOrders().catch((e) =>
         this.logger.error(`[ExpiredOrdersCleanup] Error en limpieza: ${e}`),
