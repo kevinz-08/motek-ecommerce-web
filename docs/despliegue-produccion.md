@@ -83,22 +83,28 @@ REGION=us-east5
    `api.env.yaml` debe incluir `BACKGROUND_JOBS_MODE: "scheduler"` y Secret Manager el
    secreto `CRON_SECRET`.
 
-5. **Verificación:** `curl https://<url-cloud-run>/health`.
+5. **Verificación:** `curl https://<url-cloud-run>/health`. Para probar una tarea a mano con
+   curl hay que enviar cuerpo (`-d ''`): el balanceador de Google responde 411 a un POST sin
+   `Content-Length`.
+
+   URL de producción: `https://motek-api-995699039803.us-east5.run.app`.
 
 6. **Tareas programadas (Cloud Scheduler).** Con `BACKGROUND_JOBS_MODE=scheduler` la API no
    programa timers: las colas y el polling se disparan desde Cloud Scheduler con
    `POST /internal/jobs/:job` y la cabecera `x-cron-secret`. El endpoint responde cuando la
    tarea termina, así que corre con CPU aunque Cloud Run esté en modo "CPU solo durante
    peticiones". Habilitar la API una vez: `gcloud services enable cloudscheduler.googleapis.com $G`.
+   Cloud Scheduler no existe en `us-east5`: las tareas viven en `us-east1` (solo es el origen
+   del disparo; la API sigue en `us-east5`).
 
    ```bash
    URL=https://<url-cloud-run>
    CRON=$(grep '^CRON_SECRET=' C:/deploy/api.env.production | cut -d= -f2-)
    crear() {  # nombre, cron, job
-     gcloud scheduler jobs create http "motek-$1" $G --location=$REGION \
+     gcloud scheduler jobs create http "motek-$1" $G --location=us-east1 \
        --schedule="$2" --time-zone="America/Bogota" \
        --uri="$URL/internal/jobs/$3" --http-method=POST \
-       --headers="x-cron-secret=$CRON" --attempt-deadline=300s
+       --headers="x-cron-secret=$CRON,Content-Type=application/json" --message-body='{}'        --attempt-deadline=300s --max-retry-attempts=2
    }
    crear vendelo-orders  "*/2 * * * *"  vendelo-orders
    crear emails          "*/2 * * * *"  emails
@@ -117,7 +123,9 @@ REGION=us-east5
    | `expired-orders` | 1 h | Cancela pedidos sin pagar de más de 2 h |
    | `vendelo-wallet` | 8:00 diario | Alerta si el saldo de Vendelo está bajo |
 
-   Probar una tarea a mano: `gcloud scheduler jobs run motek-emails $G --location=$REGION`.
+   Probar una tarea a mano: `gcloud scheduler jobs run motek-emails $G --location=us-east1`.
+   `VENDELO_POLL_ENABLED` debe ser `"true"` en `api.env.yaml`: con `false` la tarea
+   `shipments` no hace nada y los estados de envío no se actualizan.
 
    Costo: las peticiones caen dentro de la capa gratuita de Cloud Run; Cloud Scheduler
    cobra USD 0,10/mes por tarea después de las 3 primeras (≈ USD 0,30/mes). Efecto

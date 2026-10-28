@@ -798,3 +798,17 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Fuera del repo: `apps/web/.env` también apunta a `dev` (respaldo en `apps/web/.env.bak-prod`).
 
 **Verificación:** `prisma migrate deploy` ahora reporta el host de la rama `dev` (`ep-winter-wind…`) y le aplicó la migración, que no tenía; en producción `migrate deploy` informa que no hay pendientes. `pnpm exec tsx --version` funciona en `apps/api`.
+
+---
+
+## 2026-10-28 — Primer despliegue de la API en Cloud Run
+
+**Problema/Motivo:** Lanzamiento a producción.
+
+**Cambios:**
+
+- Infraestructura (fuera del repo): servicio `motek-api` en Cloud Run (`motek-app-web`, `us-east5`, escala a cero, imagen `motek-api:fadef34`), 12 secretos en Secret Manager, 6 tareas en Cloud Scheduler (`us-east1`, el servicio no existe en `us-east5`). Vendelo en modo OAuth: refresh token cargado y rotado en `VendeloCredential`. Producción limpia de pedidos de prueba y del cliente del seed.
+- `C:\deploy\api.env.yaml`: `VENDELO_POLL_ENABLED` pasa a `"true"` (estaba en `false`, lo que dejaba sin sincronizar los estados de envío). `C:\deploy\web.env.production`: `API_URL`/`NEXT_PUBLIC_API_URL` con la URL de Cloud Run.
+- `docs/despliegue-produccion.md` — región de Cloud Scheduler, cabeceras/cuerpo de las tareas, aviso del 411 de curl sin cuerpo, `VENDELO_POLL_ENABLED` y URL de producción.
+
+**Verificación:** `GET /health` → `{"status":"ok","db":"ok"}`. `POST /internal/jobs/*` responde 401 sin secreto o con secreto incorrecto y 200 con el correcto (`emails`, `vendelo-orders`, `vendelo-wallet` autenticó contra Venndelo vía OAuth desde Cloud Run, `shipments` con polling activo). Cloud Scheduler disparó `motek-emails` y la API registró `200` con user agent `Google-Cloud-Scheduler`. Logs del arranque sin errores.
