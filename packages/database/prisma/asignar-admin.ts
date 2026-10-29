@@ -48,6 +48,22 @@ async function main() {
   })
   if (!target) {
     console.error(`La cuenta ${email} no existe. Inicia sesión con ella una vez en la tienda y repite.`)
+    // Ayuda a identificar con qué correo se entró realmente (enmascarado)
+    const recent = await prisma.user.findMany({
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { email: true, name: true, role: true, createdAt: true, accounts: { select: { provider: true } } },
+    })
+    if (recent.length) {
+      console.error('\nCuentas más recientes en esta base:')
+      for (const u of recent) {
+        const [user, domain] = u.email.split('@')
+        console.error(
+          `  ${u.createdAt.toISOString().slice(0, 16)}  ${(user ?? '').slice(0, 3)}***@${domain ?? ''}  `
+          + `nombre="${u.name ?? ''}"  rol=${u.role}  acceso=${u.accounts.map((a) => a.provider).join(',') || 'contraseña'}`,
+        )
+      }
+    }
     process.exitCode = 1
     return
   }

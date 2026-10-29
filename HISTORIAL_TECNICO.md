@@ -861,3 +861,15 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `packages/database/prisma/asignar-admin.ts` — da rol ADMIN a `--email` y, con `--desactivar`, pasa esa otra cuenta a CUSTOMER con una contraseña aleatoria y cierra sus sesiones. Aborta si la cuenta a promover no existe (nunca deja la tienda sin admin). Simulación por defecto; aplica con `--confirmar`.
 
 **Verificación:** contra la rama `dev`: simulación con una cuenta existente, error claro si la cuenta a promover no existe, rechazo si ambas cuentas son la misma y si falta `--email`; compila con `tsc`. Nota: `pnpm --filter @motek/database exec tsx … --a=… --b=…` falla con "tsx not found" cuando se pasan varios flags; ejecutar desde `packages/database` con `pnpm exec tsx`. Las ciudades quedaron sincronizadas en producción (la búsqueda de `/api/vendelo/cities` devuelve resultados con su estado de cobertura).
+
+---
+
+## 2026-10-28 — asignar-admin.ts: mostrar cuentas recientes si no encuentra el correo
+
+**Problema/Motivo:** En producción `motekdev@gmail.com` no existe: el inicio de sesión con Google de la evidencia se hizo con otra cuenta. Sin acceso directo a la base, hacía falta saber con qué correo se creó la cuenta.
+
+**Cambios:**
+
+- `packages/database/prisma/asignar-admin.ts` — si la cuenta a promover no existe, lista las 5 cuentas más recientes (correo enmascarado, nombre, rol y forma de acceso) sin modificar nada.
+
+**Verificación:** contra la rama `dev` con un correo inexistente: muestra la lista y termina con error sin cambios; compila con `tsc`.
