@@ -849,3 +849,15 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `docs/blueprint/pruebas-imgs/login-con-google.png` — captura de la tienda en producción con la sesión iniciada vía Google ("¡Bienvenido! Iniciaste sesión con Google").
 
 **Verificación:** prueba manual en producción; complementa la verificación automática de la entrada anterior (redirección a `accounts.google.com` aceptada por Google).
+
+---
+
+## 2026-10-28 — Script para asignar el admin real y desactivar el admin heredado
+
+**Problema/Motivo:** La sincronización de ciudades falló con 401 porque el único admin de producción es `admin@electromotos-tony.co`, creado por una versión vieja de `prisma/seed.ts` con la contraseña `Admin123!` escrita en el repositorio. Su correo de recuperación no es del negocio, así que no se puede cambiar por "olvidé mi contraseña". La cuenta real del negocio (`motekdev@gmail.com`, creada al iniciar sesión con Google) debe ser la administradora.
+
+**Cambios:**
+
+- `packages/database/prisma/asignar-admin.ts` — da rol ADMIN a `--email` y, con `--desactivar`, pasa esa otra cuenta a CUSTOMER con una contraseña aleatoria y cierra sus sesiones. Aborta si la cuenta a promover no existe (nunca deja la tienda sin admin). Simulación por defecto; aplica con `--confirmar`.
+
+**Verificación:** contra la rama `dev`: simulación con una cuenta existente, error claro si la cuenta a promover no existe, rechazo si ambas cuentas son la misma y si falta `--email`; compila con `tsc`. Nota: `pnpm --filter @motek/database exec tsx … --a=… --b=…` falla con "tsx not found" cuando se pasan varios flags; ejecutar desde `packages/database` con `pnpm exec tsx`. Las ciudades quedaron sincronizadas en producción (la búsqueda de `/api/vendelo/cities` devuelve resultados con su estado de cobertura).
