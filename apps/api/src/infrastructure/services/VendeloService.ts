@@ -189,7 +189,10 @@ export class VendeloService implements IVendeloShippingPort {
         postal_code: addr.postalCode ?? '',
       },
       line_items: (order.items ?? []).map((item) => ({
-        type: 'STANDARD' as const,
+        // VIRTUAL: el producto solo existe en Motek, no en el catálogo de Venndelo.
+        // STANDARD exige variation_id de un producto creado en Venndelo y la API
+        // responde 422 ("Se requiere variation_id para productos de tipo STANDARD").
+        type: 'VIRTUAL' as const,
         name: item.productSnapshot?.name ?? `Producto ${item.productId}`,
         sku: item.productSnapshot?.sku ?? item.productId,
         quantity: item.quantity,
@@ -251,7 +254,10 @@ export class VendeloService implements IVendeloShippingPort {
         postal_code: '',
       },
       line_items: input.items.map((item) => ({
-        type: 'STANDARD' as const,
+        // VIRTUAL: el producto solo existe en Motek, no en el catálogo de Venndelo.
+        // STANDARD exige variation_id de un producto creado en Venndelo y la API
+        // responde 422 ("Se requiere variation_id para productos de tipo STANDARD").
+        type: 'VIRTUAL' as const,
         sku: item.sku ?? item.productId,
         name: item.name ?? `Producto ${item.productId}`,
         unit_price: toPesos(item.unitPrice ?? 0),

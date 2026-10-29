@@ -11,6 +11,10 @@
  *
  * Mismo esqueleto visual/de comportamiento que ProfileModal: backdrop con
  * blur, cierre por click afuera + Escape, scroll-lock del body.
+ *
+ * Tema claro, igual que el resto del storefront (docs/design-system.md §1.1):
+ * el panel usa los tokens --c-* de :root, así LoginForm/RegisterForm/
+ * GoogleSignInButton se ven igual que en las páginas /auth/*.
  */
 import { useEffect } from 'react'
 import Link from 'next/link'
@@ -48,23 +52,21 @@ export function AuthModal() {
   return (
     /* Backdrop */
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
       onMouseDown={(e) => { if (e.target === e.currentTarget) close() }}
     >
-      {/* Panel — `.auth-modal-dark` (ver globals.css) para que LoginForm/
-          RegisterForm/GoogleSignInButton, que ahora consumen tokens --c-*, resuelvan
-          en oscuro aquí adentro sin necesitar una versión de esos componentes por tema. */}
+      {/* Panel */}
       <div
         role="dialog"
         aria-modal="true"
         aria-label={mode === 'login' ? 'Iniciar sesión' : 'Crear cuenta'}
-        className="auth-modal-dark relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-[#111] border border-white/10 rounded-2xl shadow-2xl animate-fadeIn"
+        className="relative w-full max-w-md max-h-[90vh] overflow-y-auto bg-[var(--c-surface)] border border-[var(--c-border)] rounded-2xl shadow-[var(--shadow-lg)] animate-fadeIn"
       >
         {/* Cerrar */}
         <button
           onClick={close}
           aria-label="Cerrar"
-          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-white/40 hover:bg-white/10 rounded-lg transition-colors"
+          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-[var(--c-text-3)] hover:text-[var(--c-text)] hover:bg-[var(--c-surface-2)] rounded-lg transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -83,7 +85,7 @@ export function AuthModal() {
                 className="object-contain block mx-auto"
               />
             </Link>
-            <p className="text-white/50 mt-1 text-sm">
+            <p className="text-[var(--c-text-3)] mt-1 text-sm">
               {mode === 'login' ? 'Inicia sesión en tu cuenta' : 'Crea tu cuenta gratuita'}
             </p>
           </div>
@@ -98,10 +100,10 @@ export function AuthModal() {
           {/* Separador */}
           <div className="relative my-5">
             <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-white/10" />
+              <div className="w-full border-t border-[var(--c-border)]" />
             </div>
             <div className="relative flex justify-center">
-              <span className="bg-[#111] px-3 text-xs text-white/30">
+              <span className="bg-[var(--c-surface)] px-3 text-xs text-[var(--c-text-3)]">
                 {mode === 'login' ? 'o continúa con' : 'o regístrate con'}
               </span>
             </div>
@@ -110,7 +112,7 @@ export function AuthModal() {
           <GoogleSignInButton callbackUrl={callbackUrl ?? undefined} />
 
           {/* Alternar entre login/registro sin cerrar el modal */}
-          <p className="text-sm text-white/40 text-center mt-6">
+          <p className="text-sm text-[var(--c-text-3)] text-center mt-6">
             {mode === 'login' ? (
               <>
                 ¿No tienes cuenta?{' '}
@@ -136,7 +138,7 @@ export function AuthModal() {
             )}
           </p>
 
-          <p className="text-xs text-white/20 text-center mt-3">
+          <p className="text-xs text-[var(--c-text-4)] text-center mt-3">
             Al ingresar aceptas nuestros términos de uso y política de privacidad.
           </p>
         </div>

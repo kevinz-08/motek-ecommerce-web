@@ -825,3 +825,91 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Redespliegue de producción (`vercel redeploy --target production`) del commit actual de `main`, construido por Vercel desde GitHub. (`vercel deploy --prod` desde el equipo local falla: sube 636 MB y excede el límite de 100 MB por archivo; el proyecto despliega vía integración con GitHub.)
 
 **Verificación:** el nuevo despliegue quedó `Ready` con alias `www.tiendamotek.com` y `tiendamotek.com`. El JavaScript servido referencia `https://motek-api-995699039803.us-east5.run.app` y ya no `localhost:3001`. Páginas `/`, `/catalogo`, `/carrito`, `/checkout`, `/auth/login`, `/pedidos/seguimiento` responden 200; `/api/shipping/quote` valida y responde. Variables no sensibles comparadas contra el archivo de deploy: coinciden.
+
+---
+
+## 2026-10-28 — Cliente OAuth de Google en el proyecto de Motek
+
+**Problema/Motivo:** El proyecto `motek-app-web` no tenía configurado Google Auth Platform; el login con Google de producción necesitaba un cliente OAuth propio con el dominio `www.tiendamotek.com`.
+
+**Cambios:**
+
+- Infraestructura (fuera del repo): cliente OAuth web "Motek Web" (origen `https://www.tiendamotek.com`, redirección `https://www.tiendamotek.com/api/auth/callback/google`). `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` actualizados en `C:\deploy\web.env.production` y en Vercel (Production, el secreto como *Sensitive*); redespliegue de producción.
+
+**Verificación:** los valores se transcribieron de una captura y se validaron contra Google antes de cargarlos: el ID con el endpoint de autorización (única variante sin `invalid_client`, calibrado con un ID inventado) y el secreto con el endpoint de tokens (única variante que responde `invalid_grant` en vez de `invalid_client`). En producción, `POST /api/auth/signin/google` redirige a `accounts.google.com` con el ID nuevo y Google acepta la solicitud (pantalla de inicio de sesión, sin error).
+
+---
+
+## 2026-10-28 — Evidencia: login con Google en producción
+
+**Problema/Motivo:** Dejar constancia de que el cliente OAuth de Google (`motek-app-web`) funciona en `www.tiendamotek.com` antes del lanzamiento (`release/v1-alpha`).
+
+**Cambios:**
+
+- `docs/blueprint/pruebas-imgs/login-con-google.png` — captura de la tienda en producción con la sesión iniciada vía Google ("¡Bienvenido! Iniciaste sesión con Google").
+
+**Verificación:** prueba manual en producción; complementa la verificación automática de la entrada anterior (redirección a `accounts.google.com` aceptada por Google).
+
+---
+
+## 2026-10-28 — Script para asignar el admin real y desactivar el admin heredado
+
+**Problema/Motivo:** La sincronización de ciudades falló con 401 porque el único admin de producción es `admin@electromotos-tony.co`, creado por una versión vieja de `prisma/seed.ts` con la contraseña `Admin123!` escrita en el repositorio. Su correo de recuperación no es del negocio, así que no se puede cambiar por "olvidé mi contraseña". La cuenta real del negocio (`motekdev@gmail.com`, creada al iniciar sesión con Google) debe ser la administradora.
+
+**Cambios:**
+
+- `packages/database/prisma/asignar-admin.ts` — da rol ADMIN a `--email` y, con `--desactivar`, pasa esa otra cuenta a CUSTOMER con una contraseña aleatoria y cierra sus sesiones. Aborta si la cuenta a promover no existe (nunca deja la tienda sin admin). Simulación por defecto; aplica con `--confirmar`.
+
+**Verificación:** contra la rama `dev`: simulación con una cuenta existente, error claro si la cuenta a promover no existe, rechazo si ambas cuentas son la misma y si falta `--email`; compila con `tsc`. Nota: `pnpm --filter @motek/database exec tsx … --a=… --b=…` falla con "tsx not found" cuando se pasan varios flags; ejecutar desde `packages/database` con `pnpm exec tsx`. Las ciudades quedaron sincronizadas en producción (la búsqueda de `/api/vendelo/cities` devuelve resultados con su estado de cobertura).
+
+---
+
+## 2026-10-28 — asignar-admin.ts: mostrar cuentas recientes si no encuentra el correo
+
+**Problema/Motivo:** En producción `motekdev@gmail.com` no existe: el inicio de sesión con Google de la evidencia se hizo con otra cuenta. Sin acceso directo a la base, hacía falta saber con qué correo se creó la cuenta.
+
+**Cambios:**
+
+- `packages/database/prisma/asignar-admin.ts` — si la cuenta a promover no existe, lista las 5 cuentas más recientes (correo enmascarado, nombre, rol y forma de acceso) sin modificar nada.
+
+**Verificación:** contra la rama `dev` con un correo inexistente: muestra la lista y termina con error sin cambios; compila con `tsc`.
+
+---
+
+## 2026-10-28 — Modales de cuenta en tema claro y nombre de usuario tras cerrar sesión
+
+**Problema/Motivo:** Los modales "Crear cuenta", "Iniciar sesión" y "Mi cuenta" se veían en negro dentro de un storefront que es siempre claro (docs/design-system.md §1.1). Además, después de cerrar sesión el encabezado seguía mostrando el nombre del último usuario: el nombre se cacheaba en `sessionStorage` (para evitar un parpadeo al remontar), nunca se borraba al cerrar sesión, y sin sesión el componente volvía a usar ese valor cacheado.
+
+**Cambios:**
+
+- `apps/web/src/components/auth/AuthModal.tsx` — sin la clase `.auth-modal-dark` ni colores fijos (`#111`, `white/*`): panel, textos, separador y botón de cierre con los tokens `--c-*` claros. `LoginForm`, `RegisterForm` y `GoogleSignInButton` ya usaban esos tokens, así que se ven igual que en las páginas `/auth/*`.
+- `apps/web/src/components/nav/ProfileModal.tsx` — mismo cambio a tokens claros (panel, avatar, textos, campo de celular y botones).
+- `apps/web/src/components/nav/Navbar.tsx` — el nombre cacheado se usa solo mientras la sesión está `loading`; con `unauthenticated` se borra del `sessionStorage` y el botón de cuenta muestra únicamente el ícono; "Cerrar sesión" (desktop y mobile) borra el caché antes de `signOut`.
+
+**Verificación:** type-check de `apps/web/src` sin errores; ESLint de los tres archivos sin errores y con los mismos 8 avisos que antes del cambio. Revisión visual pendiente en el Preview de Vercel de `release/v1-alpha`.
+
+---
+
+## 2026-10-28 — Ítems de Vendelo como VIRTUAL (la cotización fallaba con 422)
+
+**Problema/Motivo:** En producción `POST /shipping/quote` respondía 500. Vendelo devolvía `422: Se requiere variation_id para productos de tipo STANDARD`. Desde la alineación con el spec (2026-10-15) la cotización enviaba `type: 'STANDARD'`, y la creación de pedidos ya lo enviaba antes. Según el spec, `STANDARD` es un producto creado en el catálogo de Venndelo (exige `variation_id`) y `VIRTUAL` uno que solo existe en el pedido — el caso de Motek, cuyos productos no existen en Venndelo.
+
+**Cambios:**
+
+- `apps/api/src/infrastructure/services/VendeloService.ts` — `createOrder` y `quoteOrder` envían `type: 'VIRTUAL'` (sin `variation_id`).
+- `apps/api/src/__tests__/VendeloService.test.ts` — la cotización espera `VIRTUAL`; nuevo caso que verifica `VIRTUAL` sin `variation_id` en pedidos y cotizaciones.
+
+**Verificación:** logs de Cloud Run con el 422 exacto de Vendelo; `pnpm --filter @motek/api test` → 303/303; type-check OK. Verificación en producción tras el despliegue: ver entrada siguiente o mensaje del despliegue.
+
+---
+
+## 2026-10-28 — Dirección de recogida en Venndelo: cotización funcionando en producción
+
+**Problema/Motivo:** Con los ítems ya enviados como `VIRTUAL`, Vendelo respondía `500: No es posible obtener la dirección de recogida del producto`: la cuenta de Venndelo no tenía dirección de recogida configurada (los productos virtuales no tienen bodega propia en Venndelo).
+
+**Cambios:**
+
+- Configuración externa (panel de Venndelo → Mi Cuenta): ciudad de despacho Bucaramanga - Santander y dirección `Boulevard Santander #23-31, Bucaramanga, Santander`. Sin cambios de código.
+- API en producción con la corrección `VIRTUAL` (revisión `motek-api-00003`, imagen `motek-api:c3417da`).
+
+**Verificación:** `POST https://www.tiendamotek.com/api/shipping/quote` con un producto real responde 200 hacia Bucaramanga ($13.900), Bogotá ($17.000), Medellín ($17.000) y Pasto ($23.800); contra entrega a Bogotá ($17.024, incluye comisión de recaudo).
