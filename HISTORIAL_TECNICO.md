@@ -837,3 +837,15 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Infraestructura (fuera del repo): cliente OAuth web "Motek Web" (origen `https://www.tiendamotek.com`, redirección `https://www.tiendamotek.com/api/auth/callback/google`). `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` actualizados en `C:\deploy\web.env.production` y en Vercel (Production, el secreto como *Sensitive*); redespliegue de producción.
 
 **Verificación:** los valores se transcribieron de una captura y se validaron contra Google antes de cargarlos: el ID con el endpoint de autorización (única variante sin `invalid_client`, calibrado con un ID inventado) y el secreto con el endpoint de tokens (única variante que responde `invalid_grant` en vez de `invalid_client`). En producción, `POST /api/auth/signin/google` redirige a `accounts.google.com` con el ID nuevo y Google acepta la solicitud (pantalla de inicio de sesión, sin error).
+
+---
+
+## 2026-10-28 — Evidencia: login con Google en producción
+
+**Problema/Motivo:** Dejar constancia de que el cliente OAuth de Google (`motek-app-web`) funciona en `www.tiendamotek.com` antes del lanzamiento (`release/v1-alpha`).
+
+**Cambios:**
+
+- `docs/blueprint/pruebas-imgs/login-con-google.png` — captura de la tienda en producción con la sesión iniciada vía Google ("¡Bienvenido! Iniciaste sesión con Google").
+
+**Verificación:** prueba manual en producción; complementa la verificación automática de la entrada anterior (redirección a `accounts.google.com` aceptada por Google).
