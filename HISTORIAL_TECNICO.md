@@ -873,3 +873,17 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `packages/database/prisma/asignar-admin.ts` — si la cuenta a promover no existe, lista las 5 cuentas más recientes (correo enmascarado, nombre, rol y forma de acceso) sin modificar nada.
 
 **Verificación:** contra la rama `dev` con un correo inexistente: muestra la lista y termina con error sin cambios; compila con `tsc`.
+
+---
+
+## 2026-10-28 — Modales de cuenta en tema claro y nombre de usuario tras cerrar sesión
+
+**Problema/Motivo:** Los modales "Crear cuenta", "Iniciar sesión" y "Mi cuenta" se veían en negro dentro de un storefront que es siempre claro (docs/design-system.md §1.1). Además, después de cerrar sesión el encabezado seguía mostrando el nombre del último usuario: el nombre se cacheaba en `sessionStorage` (para evitar un parpadeo al remontar), nunca se borraba al cerrar sesión, y sin sesión el componente volvía a usar ese valor cacheado.
+
+**Cambios:**
+
+- `apps/web/src/components/auth/AuthModal.tsx` — sin la clase `.auth-modal-dark` ni colores fijos (`#111`, `white/*`): panel, textos, separador y botón de cierre con los tokens `--c-*` claros. `LoginForm`, `RegisterForm` y `GoogleSignInButton` ya usaban esos tokens, así que se ven igual que en las páginas `/auth/*`.
+- `apps/web/src/components/nav/ProfileModal.tsx` — mismo cambio a tokens claros (panel, avatar, textos, campo de celular y botones).
+- `apps/web/src/components/nav/Navbar.tsx` — el nombre cacheado se usa solo mientras la sesión está `loading`; con `unauthenticated` se borra del `sessionStorage` y el botón de cuenta muestra únicamente el ícono; "Cerrar sesión" (desktop y mobile) borra el caché antes de `signOut`.
+
+**Verificación:** type-check de `apps/web/src` sin errores; ESLint de los tres archivos sin errores y con los mismos 8 avisos que antes del cambio. Revisión visual pendiente en el Preview de Vercel de `release/v1-alpha`.

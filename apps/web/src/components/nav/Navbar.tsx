@@ -12,7 +12,10 @@
  *
  * Dos correcciones:
  *   1. Cachear el firstName en sessionStorage.  Al remontar, el useEffect
- *      lee el valor guardado → no hay flash de "Mi cuenta".
+ *      lee el valor guardado → no hay flash de "Mi cuenta".  El caché se usa
+ *      SOLO mientras la sesión está "loading": sin sesión se borra y el botón
+ *      muestra únicamente el ícono (antes quedaba el nombre del último usuario
+ *      después de cerrar sesión).
  *   2. Reemplazar el link a /perfil (ruta inexistente) por ProfileModal.
  *      Esto elimina la fuente del 404 y evita que el ciclo se repita.
  *
@@ -81,10 +84,10 @@ export function Navbar({ categories, motorcycleBrands }: NavbarProps) {
   const isAdmin = user?.role === 'ADMIN'
 
   // ── Corrección: caché del nombre en sessionStorage ────────────────────────
-  // Arranca con "Mi cuenta" para evitar mismatch SSR/cliente.
-  // En el primer useEffect del cliente carga el valor cacheado,
-  // y cuando la sesión resuelve actualiza el caché para futuros remounts.
-  const [cachedName, setCachedName] = useState<string>('Mi cuenta')
+  // Arranca vacío (mismo valor en SSR y cliente → sin mismatch). En el primer
+  // useEffect del cliente carga el valor cacheado, y cuando la sesión resuelve
+  // actualiza el caché para futuros remounts — o lo borra si no hay sesión.
+  const [cachedName, setCachedName] = useState<string>('')
 
   useEffect(() => {
     const saved = sessionStorage.getItem(SESSION_KEY)
@@ -92,17 +95,34 @@ export function Navbar({ categories, motorcycleBrands }: NavbarProps) {
   }, [])
 
   useEffect(() => {
+    if (status === 'unauthenticated') {
+      sessionStorage.removeItem(SESSION_KEY)
+      setCachedName('')
+      return
+    }
     const name = user?.name?.split(' ')[0]
-    if (name) {
+    if (status === 'authenticated' && name) {
       setCachedName(name)
       sessionStorage.setItem(SESSION_KEY, name)
     }
-  }, [user?.name])
+  }, [status, user?.name])
 
-  // Durante "loading" usar el nombre cacheado → evita flash de "Mi cuenta"
+  // "loading"        → nombre cacheado (evita el flash al remontar)
+  // "authenticated"  → nombre real ("Mi cuenta" si la cuenta no tiene nombre)
+  // "unauthenticated"→ vacío: el botón muestra solo el ícono
   const firstName = status === 'loading'
     ? cachedName
-    : (user?.name?.split(' ')[0] ?? cachedName)
+    : status === 'authenticated'
+      ? (user?.name?.split(' ')[0] || 'Mi cuenta')
+      : ''
+
+  /** Cierra sesión olvidando el nombre cacheado, para que no reaparezca. */
+  const handleSignOut = () => {
+    sessionStorage.removeItem(SESSION_KEY)
+    sessionStorage.setItem('motek-store-logout', '1')
+    setCachedName('')
+    signOut({ callbackUrl: '/' })
+  }
 
   // ── Navegación y buscador ─────────────────────────────────────────────────
   const pathname     = usePathname()
@@ -363,7 +383,7 @@ export function Navbar({ categories, motorcycleBrands }: NavbarProps) {
 
               <div className="my-1 border-t border-[var(--c-border)]" />
               <button
-                onClick={() => { sessionStorage.setItem('motek-store-logout', '1'); signOut({ callbackUrl: '/' }); setUserOpen(false) }}
+                onClick={() => { handleSignOut(); setUserOpen(false) }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-[var(--c-accent)] hover:bg-[var(--c-active-bg)] rounded-lg transition-colors"
               >
                 <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -446,7 +466,7 @@ export function Navbar({ categories, motorcycleBrands }: NavbarProps) {
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                         d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                     </svg>
-                    <span className="hidden sm:inline text-xs font-medium">{firstName}</span>
+                    {firstName && <span className="hidden sm:inline text-xs font-medium">{firstName}</span>}
                   </button>
                   {userOpen && <UserDropdown />}
                 </div>
@@ -555,7 +575,7 @@ export function Navbar({ categories, motorcycleBrands }: NavbarProps) {
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                     d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                 </svg>
-                <span className="hidden lg:inline text-xs font-medium">{firstName}</span>
+                {firstName && <span className="hidden lg:inline text-xs font-medium">{firstName}</span>}
               </button>
               {userOpen && <UserDropdown />}
             </div>
@@ -875,7 +895,7 @@ export function Navbar({ categories, motorcycleBrands }: NavbarProps) {
                   </button>
                 </div>
                 <button
-                  onClick={() => { sessionStorage.setItem('motek-store-logout', '1'); signOut({ callbackUrl: '/' }); setMobileOpen(false) }}
+                  onClick={() => { handleSignOut(); setMobileOpen(false) }}
                   className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-[var(--c-accent)] hover:bg-[var(--c-active-bg)] rounded-lg transition-colors"
                 >
                   Cerrar sesión

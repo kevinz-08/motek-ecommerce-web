@@ -13,6 +13,8 @@
  *   - Campo de celular (se guarda en localStorage — TODO: sincronizar con DB)
  *   - Botón "Contactar con soporte" → WhatsApp
  *   - Botón "Ver mis pedidos" → /pedidos
+ *
+ * Tema claro con los tokens --c-* de :root, igual que el resto del storefront.
  */
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
@@ -85,7 +87,7 @@ export function ProfileModal({ isOpen, onClose, user }: Props) {
   return (
     /* Backdrop */
     <div
-      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+      className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}
     >
       {/* Panel */}
@@ -94,13 +96,13 @@ export function ProfileModal({ isOpen, onClose, user }: Props) {
         role="dialog"
         aria-modal="true"
         aria-label="Perfil de usuario"
-        className="relative w-full max-w-sm bg-[#111] border border-white/10 rounded-2xl shadow-2xl overflow-hidden animate-fadeIn"
+        className="relative w-full max-w-sm bg-[var(--c-surface)] border border-[var(--c-border)] rounded-2xl shadow-[var(--shadow-lg)] overflow-hidden animate-fadeIn"
       >
         {/* Cerrar */}
         <button
           onClick={onClose}
           aria-label="Cerrar"
-          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-white/40 hover:bg-white/10 rounded-lg transition-colors"
+          className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center text-[var(--c-text-3)] hover:text-[var(--c-text)] hover:bg-[var(--c-surface-2)] rounded-lg transition-colors"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -108,16 +110,16 @@ export function ProfileModal({ isOpen, onClose, user }: Props) {
         </button>
 
         {/* ── Cabecera con avatar ────────────────────────────────────── */}
-        <div className="flex flex-col items-center px-8 pt-8 pb-6 border-b border-white/10">
+        <div className="flex flex-col items-center px-8 pt-8 pb-6 border-b border-[var(--c-border)]">
           {/* Avatar con iniciales */}
-          <div className="w-20 h-20 rounded-full bg-[var(--c-accent)] flex items-center justify-center text-white text-2xl font-black mb-4 select-none shadow-lg ring-4 ring-[var(--c-accent)]/20">
+          <div className="w-20 h-20 rounded-full bg-[var(--c-accent)] flex items-center justify-center text-[var(--c-text-on-accent)] text-2xl font-black mb-4 select-none shadow-lg ring-4 ring-[var(--c-accent)]/20">
             {initials}
           </div>
 
-          <h2 className="text-lg font-bold text-white text-center leading-snug">
+          <h2 className="text-lg font-bold text-[var(--c-text)] text-center leading-snug">
             {user?.name ?? 'Usuario'}
           </h2>
-          <p className="text-sm text-white/40 mt-0.5 text-center">
+          <p className="text-sm text-[var(--c-text-3)] mt-0.5 text-center">
             {user?.email ?? '—'}
           </p>
         </div>
@@ -129,7 +131,7 @@ export function ProfileModal({ isOpen, onClose, user }: Props) {
           <div>
             <label
               htmlFor="profile-phone"
-              className="block text-xs font-semibold text-white/50 uppercase tracking-widest mb-1.5"
+              className="block text-xs font-semibold text-[var(--c-text-3)] uppercase tracking-widest mb-1.5"
             >
               Número de celular
             </label>
@@ -141,14 +143,14 @@ export function ProfileModal({ isOpen, onClose, user }: Props) {
                 onChange={(e) => setPhone(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter') handleSavePhone() }}
                 placeholder="+57 300 000 0000"
-                className="flex-1 bg-white/5 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/20 focus:outline-none focus:border-[var(--c-accent)] transition-colors"
+                className="flex-1 bg-[var(--c-surface)] border border-[var(--c-border)] rounded-xl px-3 py-2.5 text-sm text-[var(--c-text)] placeholder-[var(--c-text-4)] focus:outline-none focus:border-[var(--c-accent)] transition-colors"
               />
               <button
                 onClick={handleSavePhone}
                 className={`shrink-0 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   saved
-                    ? 'bg-green-600 text-white'
-                    : 'bg-white/10 hover:bg-white/15 text-white'
+                    ? 'bg-[var(--c-success)] text-white'
+                    : 'bg-[var(--c-surface-2)] hover:bg-[var(--c-surface-hover)] border border-[var(--c-border)] text-[var(--c-text)]'
                 }`}
               >
                 {saved ? '✓' : 'Guardar'}
@@ -177,7 +179,7 @@ export function ProfileModal({ isOpen, onClose, user }: Props) {
             <Link
               href="/pedidos"
               onClick={onClose}
-              className="flex items-center justify-center gap-2 w-full py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl font-semibold text-sm transition-colors"
+              className="flex items-center justify-center gap-2 w-full py-3 bg-[var(--c-surface)] hover:bg-[var(--c-surface-2)] border border-[var(--c-border)] text-[var(--c-text)] rounded-xl font-semibold text-sm transition-colors"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
