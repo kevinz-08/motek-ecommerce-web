@@ -900,3 +900,16 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/api/src/__tests__/VendeloService.test.ts` — la cotización espera `VIRTUAL`; nuevo caso que verifica `VIRTUAL` sin `variation_id` en pedidos y cotizaciones.
 
 **Verificación:** logs de Cloud Run con el 422 exacto de Vendelo; `pnpm --filter @motek/api test` → 303/303; type-check OK. Verificación en producción tras el despliegue: ver entrada siguiente o mensaje del despliegue.
+
+---
+
+## 2026-10-28 — Dirección de recogida en Venndelo: cotización funcionando en producción
+
+**Problema/Motivo:** Con los ítems ya enviados como `VIRTUAL`, Vendelo respondía `500: No es posible obtener la dirección de recogida del producto`: la cuenta de Venndelo no tenía dirección de recogida configurada (los productos virtuales no tienen bodega propia en Venndelo).
+
+**Cambios:**
+
+- Configuración externa (panel de Venndelo → Mi Cuenta): ciudad de despacho Bucaramanga - Santander y dirección `Boulevard Santander #23-31, Bucaramanga, Santander`. Sin cambios de código.
+- API en producción con la corrección `VIRTUAL` (revisión `motek-api-00003`, imagen `motek-api:c3417da`).
+
+**Verificación:** `POST https://www.tiendamotek.com/api/shipping/quote` con un producto real responde 200 hacia Bucaramanga ($13.900), Bogotá ($17.000), Medellín ($17.000) y Pasto ($23.800); contra entrega a Bogotá ($17.024, incluye comisión de recaudo).
