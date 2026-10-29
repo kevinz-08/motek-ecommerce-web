@@ -825,3 +825,15 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Redespliegue de producción (`vercel redeploy --target production`) del commit actual de `main`, construido por Vercel desde GitHub. (`vercel deploy --prod` desde el equipo local falla: sube 636 MB y excede el límite de 100 MB por archivo; el proyecto despliega vía integración con GitHub.)
 
 **Verificación:** el nuevo despliegue quedó `Ready` con alias `www.tiendamotek.com` y `tiendamotek.com`. El JavaScript servido referencia `https://motek-api-995699039803.us-east5.run.app` y ya no `localhost:3001`. Páginas `/`, `/catalogo`, `/carrito`, `/checkout`, `/auth/login`, `/pedidos/seguimiento` responden 200; `/api/shipping/quote` valida y responde. Variables no sensibles comparadas contra el archivo de deploy: coinciden.
+
+---
+
+## 2026-10-28 — Cliente OAuth de Google en el proyecto de Motek
+
+**Problema/Motivo:** El proyecto `motek-app-web` no tenía configurado Google Auth Platform; el login con Google de producción necesitaba un cliente OAuth propio con el dominio `www.tiendamotek.com`.
+
+**Cambios:**
+
+- Infraestructura (fuera del repo): cliente OAuth web "Motek Web" (origen `https://www.tiendamotek.com`, redirección `https://www.tiendamotek.com/api/auth/callback/google`). `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET` actualizados en `C:\deploy\web.env.production` y en Vercel (Production, el secreto como *Sensitive*); redespliegue de producción.
+
+**Verificación:** los valores se transcribieron de una captura y se validaron contra Google antes de cargarlos: el ID con el endpoint de autorización (única variante sin `invalid_client`, calibrado con un ID inventado) y el secreto con el endpoint de tokens (única variante que responde `invalid_grant` en vez de `invalid_client`). En producción, `POST /api/auth/signin/google` redirige a `accounts.google.com` con el ID nuevo y Google acepta la solicitud (pantalla de inicio de sesión, sin error).
