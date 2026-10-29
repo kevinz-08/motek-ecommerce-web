@@ -255,6 +255,21 @@ describe('VendeloService — conformidad con el spec', () => {
     expect(body.line_items[0]).toMatchObject({ weight_unit: 'KG', dimensions_unit: 'CM' })
   })
 
+  it('createOrder y quoteOrder envían ítems VIRTUAL sin variation_id (STANDARD exige un producto creado en Venndelo → 422)', async () => {
+    const http = makeHttpClientMock({ items: [{ id: 'vendelo-1' }] })
+    const service = new VendeloService(http)
+    await service.createOrder(makeOrder(), 'cliente@test.com')
+    await service.quoteOrder(BASE_INPUT)
+
+    for (const call of (http.post as ReturnType<typeof vi.fn>).mock.calls) {
+      const items = (call[1] as { line_items: Array<Record<string, unknown>> }).line_items
+      for (const item of items) {
+        expect(item['type']).toBe('VIRTUAL')
+        expect(item).not.toHaveProperty('variation_id')
+      }
+    }
+  })
+
   it('createOrder: shipping_info incluye email, city_name y subdivision_name (requeridos por el spec)', async () => {
     const http = makeHttpClientMock({ items: [{ id: 'vendelo-1' }] })
     await new VendeloService(http).createOrder(makeOrder(), 'cliente@test.com')
@@ -301,7 +316,7 @@ describe('VendeloService — conformidad con el spec', () => {
     })
 
     expect(sentBody<{ line_items: unknown[] }>(http).line_items[0]).toMatchObject({
-      type: 'STANDARD',
+      type: 'VIRTUAL',
       sku: 'BAT-12V',
       name: 'Batería 12V',
       unit_price: 50000,

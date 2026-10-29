@@ -887,3 +887,16 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/web/src/components/nav/Navbar.tsx` — el nombre cacheado se usa solo mientras la sesión está `loading`; con `unauthenticated` se borra del `sessionStorage` y el botón de cuenta muestra únicamente el ícono; "Cerrar sesión" (desktop y mobile) borra el caché antes de `signOut`.
 
 **Verificación:** type-check de `apps/web/src` sin errores; ESLint de los tres archivos sin errores y con los mismos 8 avisos que antes del cambio. Revisión visual pendiente en el Preview de Vercel de `release/v1-alpha`.
+
+---
+
+## 2026-10-28 — Ítems de Vendelo como VIRTUAL (la cotización fallaba con 422)
+
+**Problema/Motivo:** En producción `POST /shipping/quote` respondía 500. Vendelo devolvía `422: Se requiere variation_id para productos de tipo STANDARD`. Desde la alineación con el spec (2026-10-15) la cotización enviaba `type: 'STANDARD'`, y la creación de pedidos ya lo enviaba antes. Según el spec, `STANDARD` es un producto creado en el catálogo de Venndelo (exige `variation_id`) y `VIRTUAL` uno que solo existe en el pedido — el caso de Motek, cuyos productos no existen en Venndelo.
+
+**Cambios:**
+
+- `apps/api/src/infrastructure/services/VendeloService.ts` — `createOrder` y `quoteOrder` envían `type: 'VIRTUAL'` (sin `variation_id`).
+- `apps/api/src/__tests__/VendeloService.test.ts` — la cotización espera `VIRTUAL`; nuevo caso que verifica `VIRTUAL` sin `variation_id` en pedidos y cotizaciones.
+
+**Verificación:** logs de Cloud Run con el 422 exacto de Vendelo; `pnpm --filter @motek/api test` → 303/303; type-check OK. Verificación en producción tras el despliegue: ver entrada siguiente o mensaje del despliegue.
