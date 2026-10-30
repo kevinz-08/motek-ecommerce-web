@@ -14,16 +14,8 @@ const STATIC_ROUTES: MetadataRoute.Sitemap = [
     changeFrequency: 'daily',
     priority: 0.9,
   },
-  {
-    url: `${BASE_URL}/auth/login`,
-    changeFrequency: 'monthly',
-    priority: 0.3,
-  },
-  {
-    url: `${BASE_URL}/auth/register`,
-    changeFrequency: 'monthly',
-    priority: 0.3,
-  },
+  // /auth/* no va aquí: robots.ts lo bloquea y Search Console marca como error
+  // una URL del sitemap que robots.txt no deja rastrear.
 ]
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {

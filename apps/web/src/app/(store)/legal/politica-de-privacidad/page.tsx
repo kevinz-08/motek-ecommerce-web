@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'Política de Privacidad',
+  alternates: { canonical: '/legal/politica-de-privacidad' },
   description:
     'Política de privacidad y tratamiento de datos personales de Motek Store, conforme a la Ley 1581 de 2012.',
   robots: { index: true, follow: true },

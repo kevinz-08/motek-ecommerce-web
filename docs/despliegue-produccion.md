@@ -1,13 +1,17 @@
 # Despliegue a producción
 
-Guía del primer lanzamiento de Motek Store. Estado de partida y pendientes:
+Guía del primer lanzamiento de Motek Store.
+
+> **Secretos de producción:** `C:\Users\pagin\VSC-Business\motek-deploy\` — junto al repo pero
+> **fuera de git** a propósito (`api.env.production`, `api.env.yaml`, `web.env.production`).
+> Nunca moverla dentro del repositorio. Estado de partida y pendientes:
 `docs/faltantes-deploy.md`. Vendelo: `docs/vendelo-activacion.md`.
 
 | Pieza | Dónde | Identificador |
 |---|---|---|
 | API (NestJS) | Cloud Run | proyecto `motek-app-web`, región `us-east5`, servicio `motek-api` |
 | Imágenes | Artifact Registry | `us-east5-docker.pkg.dev/motek-app-web/motek/motek-api` |
-| Secretos | Secret Manager | uno por variable de `C:\deploy\api.env.production` |
+| Secretos | Secret Manager | uno por variable de `C:\Users\pagin\VSC-Business\motek-deploy\api.env.production` |
 | Web (Next.js) | Vercel | dominio `www.tiendamotek.com` |
 | Base de datos | Neon | rama principal = producción; rama `dev` = desarrollo local |
 
@@ -56,7 +60,7 @@ REGION=us-east5
    ```
 
 2. **Secretos** (una sola vez; para actualizar uno: `gcloud secrets versions add NOMBRE --data-file=-`).
-   Se crea un secreto por cada variable con valor de `C:\deploy\api.env.production`
+   Se crea un secreto por cada variable con valor de `C:\Users\pagin\VSC-Business\motek-deploy\api.env.production`
    (las vacías se omiten). La cuenta de servicio de Cloud Run necesita
    `roles/secretmanager.secretAccessor`.
 
@@ -74,7 +78,7 @@ REGION=us-east5
    # --set-secrets: uno por secreto creado en el paso 2 (NOMBRE=NOMBRE:latest, separados por coma)
    gcloud run deploy motek-api $G --region=$REGION \
      --image=$REGION-docker.pkg.dev/motek-app-web/motek/motek-api:$TAG \
-     --env-vars-file=C:/deploy/api.env.yaml \
+     --env-vars-file=C:/Users/pagin/VSC-Business/motek-deploy/api.env.yaml \
      --set-secrets=DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest \
      --min-instances=0 --max-instances=3 \
      --cpu=1 --memory=512Mi --allow-unauthenticated
@@ -99,7 +103,7 @@ REGION=us-east5
 
    ```bash
    URL=https://<url-cloud-run>
-   CRON=$(grep '^CRON_SECRET=' C:/deploy/api.env.production | cut -d= -f2-)
+   CRON=$(grep '^CRON_SECRET=' C:/Users/pagin/VSC-Business/motek-deploy/api.env.production | cut -d= -f2-)
    crear() {  # nombre, cron, job
      gcloud scheduler jobs create http "motek-$1" $G --location=us-east1 \
        --schedule="$2" --time-zone="America/Bogota" \
@@ -136,7 +140,7 @@ REGION=us-east5
 
 1. Importar el repositorio en Vercel (proyecto nuevo `motek-store`). Root Directory:
    la raíz del repo (usa `vercel.json`).
-2. Variables de entorno de producción: las de `C:\deploy\web.env.production`, con
+2. Variables de entorno de producción: las de `C:\Users\pagin\VSC-Business\motek-deploy\web.env.production`, con
    `API_URL` y `NEXT_PUBLIC_API_URL` = URL de Cloud Run (paso 2.5).
 3. Dominio: agregar `tiendamotek.com` y `www.tiendamotek.com` (redirigir el apex a `www`)
    y crear los registros DNS que indique Vercel.

@@ -2,14 +2,16 @@ import { prisma } from '@/infrastructure/database/prisma-client'
 import { MercadoPagoToggle } from '@/components/admin/MercadoPagoToggle'
 import { CodToggle } from '@/components/admin/CodToggle'
 import { ShippingOnlineToggle } from '@/components/admin/ShippingOnlineToggle'
+import { GuestCheckoutToggle } from '@/components/admin/GuestCheckoutToggle'
 import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 
 export default async function AdminConfigPage() {
-  const [mpSetting, codSetting, shippingOnlineSetting] = await Promise.all([
+  const [mpSetting, codSetting, shippingOnlineSetting, guestSetting] = await Promise.all([
     prisma.settings.findUnique({ where: { key: 'MERCADOPAGO_ENABLED' } }),
     prisma.settings.findUnique({ where: { key: 'COD_ENABLED' } }),
     prisma.settings.findUnique({ where: { key: 'SHIPPING_ONLINE_ENABLED' } }),
+    prisma.settings.findUnique({ where: { key: 'GUEST_CHECKOUT_ENABLED' } }),
   ])
 
   const mpEnabled = mpSetting?.value === 'true'
@@ -18,6 +20,11 @@ export default async function AdminConfigPage() {
   // Default FALSE si no existe la fila — no empezar a cobrar flete extra sin
   // opt-in explícito del admin (mismo criterio que orders.controller.ts).
   const shippingOnlineEnabled = shippingOnlineSetting?.value === 'true'
+  // Default FALSE si no existe la fila — kill-switch del flujo de invitados
+  // (mismo criterio que guest-orders.controller.ts).
+  const guestCheckoutEnabled = guestSetting?.value === 'true'
+  // La Site Key se incrusta al construir la web: sin ella el captcha no carga.
+  const turnstileConfigured = /^0x4/.test(process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? '')
 
   return (
     <div>
@@ -81,6 +88,37 @@ export default async function AdminConfigPage() {
                 </p>
               </div>
               <CodToggle enabled={codEnabled} />
+            </div>
+          </CardBody>
+        </Card>
+
+        {/* Compra sin registro */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Compra sin registro</CardTitle>
+          </CardHeader>
+          <CardBody>
+            <p className="text-[length:var(--text-body-sm)] text-[var(--c-text-3)] mb-6">
+              Permite comprar sin crear cuenta, con verificación anti-bots (Cloudflare Turnstile).
+              El pago contra entrega y los cupones restringidos siguen exigiendo cuenta.
+              Desactivado por defecto: apágalo en cualquier momento si detectas abuso.
+            </p>
+
+            {!turnstileConfigured && (
+              <div className="mb-4 p-3 bg-[var(--c-warning-bg)] border border-[var(--c-warning)]/30 rounded-[var(--radius-md)] text-[length:var(--text-body-sm)] text-[var(--c-text-2)]">
+                Falta la Site Key de Turnstile en el despliegue: sin ella el captcha no carga
+                y los invitados no podrán completar la compra.
+              </div>
+            )}
+
+            <div className="flex items-center justify-between gap-4 p-4 bg-[var(--c-surface-2)] border border-[var(--c-border)] rounded-[var(--radius-md)]">
+              <div className="min-w-0">
+                <p className="font-semibold text-[var(--c-text)]">Comprar sin registrarse</p>
+                <p className="text-xs text-[var(--c-text-3)]">
+                  El cliente recibe por correo un enlace para seguir su pedido sin iniciar sesión
+                </p>
+              </div>
+              <GuestCheckoutToggle enabled={guestCheckoutEnabled} />
             </div>
           </CardBody>
         </Card>

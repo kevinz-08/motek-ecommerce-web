@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'Política de Envíos',
+  alternates: { canonical: '/legal/politica-de-envios' },
   description:
     'Política de envíos, tiempos de entrega, costos y garantía legal de productos de Motek Store.',
   robots: { index: true, follow: true },

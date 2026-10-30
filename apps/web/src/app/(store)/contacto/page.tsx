@@ -5,7 +5,9 @@ import { ContactInfoBlock } from '@/components/store/ContactInfoBlock'
 import { Card } from '@/components/ui/Card'
 
 export const metadata: Metadata = {
-  title: 'Contáctanos | Motek Store',
+  // El layout raíz agrega " | Motek Store" con su title.template
+  title: 'Contáctanos',
+  alternates: { canonical: '/contacto' },
   description: 'Escríbenos tus preguntas, quejas o reclamos. Te respondemos por correo o WhatsApp.',
 }
 
