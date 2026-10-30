@@ -913,3 +913,17 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - API en producción con la corrección `VIRTUAL` (revisión `motek-api-00003`, imagen `motek-api:c3417da`).
 
 **Verificación:** `POST https://www.tiendamotek.com/api/shipping/quote` con un producto real responde 200 hacia Bucaramanga ($13.900), Bogotá ($17.000), Medellín ($17.000) y Pasto ($23.800); contra entrega a Bogotá ($17.024, incluye comisión de recaudo).
+
+---
+
+## 2026-10-29 — Turnstile en la API y carpeta de secretos de producción reubicada
+
+**Problema/Motivo:** La API de producción no tenía `TURNSTILE_SECRET_KEY` (el checkout de invitado y la solicitud de seguimiento sin cuenta responden 503 sin ella). Además, la carpeta de secretos de producción estaba en `C:\deploy`, fuera del espacio de trabajo del proyecto. Se detectó también que `NEXT_PUBLIC_TURNSTILE_SITE_KEY` en el archivo de la web —y en Vercel, donde se cargó el 2026-10-28— es el texto de relleno `PENDIENTE…`, no una llave real.
+
+**Cambios:**
+
+- Infraestructura: secreto `TURNSTILE_SECRET_KEY` creado en Secret Manager y conectado a Cloud Run (`gcloud run services update --update-secrets`, revisión `motek-api-00004`).
+- Carpeta de secretos movida de `C:\deploy` a `C:\Users\pagin\VSC-Business\motek-deploy` (junto al repo, fuera de git a propósito).
+- `docs/despliegue-produccion.md` — rutas actualizadas a la nueva carpeta y nota de que nunca debe ir dentro del repositorio.
+
+**Verificación:** la Secret Key se validó contra `siteverify` de Cloudflare antes de cargarla (responde `invalid-input-response` con un token falso; una llave inventada da `invalid-input-secret`). `/health` → 200 y el arranque de la revisión nueva ya no registra el aviso de llave faltante. La copia de la carpeta se verificó con sha256 antes de borrar el original. Pendiente: Site Key real en Vercel y nuevo despliegue de la web.
