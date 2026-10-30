@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'Términos y Condiciones',
+  alternates: { canonical: '/legal/terminos-y-condiciones' },
   description:
     'Términos y condiciones de uso del sitio web y contratos de compraventa de Motek Store.',
   robots: { index: true, follow: true },

@@ -91,9 +91,12 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
 
   if (motoMarca) {
     const label = `${motoMarca}${motoModelo ? ` ${motoModelo}` : ''}`
+    const moto = new URLSearchParams({ motoMarca })
+    if (motoModelo) moto.set('motoModelo', motoModelo)
     return {
       title: `Repuestos para ${label}`,
       description: `Repuestos y accesorios compatibles con ${label}. Envío a todo Colombia.`,
+      alternates: { canonical: `/catalogo?${moto.toString()}` },
     }
   }
 
@@ -101,6 +104,8 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
     return {
       title: `Resultados para "${search}"`,
       description: `Productos que coinciden con "${search}" en el catálogo de repuestos para motos.`,
+      // Las búsquedas no son páginas propias: se consolidan en el catálogo
+      alternates: { canonical: '/catalogo' },
     }
   }
 
@@ -110,6 +115,7 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
       return {
         title: cat.name,
         description: cat.description ?? catDesc(cat.slug),
+        alternates: { canonical: `/catalogo?category=${encodeURIComponent(cat.slug)}` },
       }
     }
   }
@@ -118,6 +124,8 @@ export async function generateMetadata({ searchParams }: PageProps): Promise<Met
     title: 'Catálogo de repuestos para motos',
     description:
       'Explora nuestro catálogo completo de repuestos, aceites, llantas y accesorios para motos. Envío a todo Colombia.',
+    // Paginación y orden no generan páginas canónicas propias
+    alternates: { canonical: '/catalogo' },
   }
 }
 

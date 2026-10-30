@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 
 export const metadata: Metadata = {
   title: 'Política de Cambios y Devoluciones',
+  alternates: { canonical: '/legal/politica-de-cambios' },
   description:
     'Política de cambios, devoluciones y reembolsos de Motek Store. Condiciones, plazos y proceso.',
   robots: { index: true, follow: true },

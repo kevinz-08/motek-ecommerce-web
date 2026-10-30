@@ -927,3 +927,21 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `docs/despliegue-produccion.md` — rutas actualizadas a la nueva carpeta y nota de que nunca debe ir dentro del repositorio.
 
 **Verificación:** la Secret Key se validó contra `siteverify` de Cloudflare antes de cargarla (responde `invalid-input-response` con un token falso; una llave inventada da `invalid-input-secret`). `/health` → 200 y el arranque de la revisión nueva ya no registra el aviso de llave faltante. La copia de la carpeta se verificó con sha256 antes de borrar el original. Pendiente: Site Key real en Vercel y nuevo despliegue de la web.
+
+---
+
+## 2026-10-29 — Interruptor de compra sin registro, Site Key de Turnstile y pulido SEO
+
+**Problema/Motivo:** No existía forma de activar la compra sin registro desde el admin (solo `PATCH /admin/settings/guest-checkout` en la API). En producción la Site Key de Turnstile era el texto de relleno `PENDIENTE…`, así que el captcha no cargaba. Detalles de pulido detectados en la tienda en vivo: `robots.txt` inexistente (404), título duplicado en `/contacto` ("Contáctanos | Motek Store | Motek Store"), sin URL canónica, sin ícono para la pantalla de inicio del celular ni manifiesto, y `/auth/*` en el sitemap. (Las cabeceras de seguridad ya estaban configuradas en `next.config.ts`; la alerta inicial fue un falso positivo del análisis.)
+
+**Cambios:**
+
+- `apps/web/src/components/admin/GuestCheckoutToggle.tsx` (nuevo) y `apps/web/src/app/admin/configuracion/page.tsx` — tarjeta "Compra sin registro" con el interruptor (`GUEST_CHECKOUT_ENABLED`, default apagado) y aviso si el despliegue no tiene Site Key de Turnstile.
+- `apps/web/src/app/robots.ts` (nuevo) — permite la tienda y bloquea `/admin`, `/api/`, `/checkout`, `/carrito`, `/pedidos`, `/auth/`; apunta al sitemap.
+- `apps/web/src/app/sitemap.ts` — sin `/auth/login` ni `/auth/register` (coherente con robots).
+- Canónicas: portada, `/catalogo` (categoría y moto conservan su filtro; búsqueda y paginación se consolidan en `/catalogo`), producto, `/contacto` y las 4 páginas legales.
+- `apps/web/src/app/(store)/contacto/page.tsx` — título sin el sufijo duplicado.
+- `apps/web/src/app/manifest.ts`, `apps/web/src/app/apple-icon.png`, `apps/web/public/icon-192.png`, `apps/web/public/icon-512.png` — manifiesto e íconos generados desde `public/assets/logo.png` sobre fondo blanco.
+- Infraestructura: `NEXT_PUBLIC_TURNSTILE_SITE_KEY` real en `motek-deploy\web.env.production` y en Vercel (Production) y redespliegue de producción.
+
+**Verificación:** type-check de `apps/web/src` y ESLint de los archivos tocados sin errores. `next build` genera `/robots.txt`, `/manifest.webmanifest`, `/apple-icon.png` y `/sitemap.xml`; con `next start` local: robots con las reglas esperadas, manifiesto e ícono 200, `<link rel="apple-touch-icon">` y `<link rel="manifest">` en el HTML, canónicas correctas en catálogo/categoría/búsqueda/contacto/legales, título de contacto sin duplicar y sitemap sin `/auth`. La Site Key aparece en el JavaScript servido por `/pedidos/seguimiento/solicitar` en producción. Pendiente: canónica de producto y captcha visibles en producción tras publicar.

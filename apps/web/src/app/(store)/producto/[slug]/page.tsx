@@ -70,6 +70,7 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
   return {
     title: result.value.name,
     description: result.value.description.slice(0, 160),
+    alternates: { canonical: `/producto/${slug}` },
   }
 }
 
