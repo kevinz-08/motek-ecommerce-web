@@ -945,3 +945,15 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Infraestructura: `NEXT_PUBLIC_TURNSTILE_SITE_KEY` real en `motek-deploy\web.env.production` y en Vercel (Production) y redespliegue de producción.
 
 **Verificación:** type-check de `apps/web/src` y ESLint de los archivos tocados sin errores. `next build` genera `/robots.txt`, `/manifest.webmanifest`, `/apple-icon.png` y `/sitemap.xml`; con `next start` local: robots con las reglas esperadas, manifiesto e ícono 200, `<link rel="apple-touch-icon">` y `<link rel="manifest">` en el HTML, canónicas correctas en catálogo/categoría/búsqueda/contacto/legales, título de contacto sin duplicar y sitemap sin `/auth`. La Site Key aparece en el JavaScript servido por `/pedidos/seguimiento/solicitar` en producción. Pendiente: canónica de producto y captcha visibles en producción tras publicar.
+
+---
+
+## 2026-10-29 — Build de producción en Vercel fallido por caché (PR #8)
+
+**Problema/Motivo:** Tras fusionar el PR #8 (`release/v1-alpha` → `main`, commit `1f58fd7`), el build de producción de Vercel falló con 27 errores de Turbopack en `next/font/google` ("Can't resolve '@vercel/turbopack-next/internal/font/google/font'" / "next/font/google queries have exactly one entry") sobre `apps/web/src/app/layout.tsx`. El mismo código construyó bien como Preview de `release/v1-alpha` minutos antes y en local con `next build`; la única diferencia fue que el build de producción restauró la caché de un despliegue anterior. Mientras tanto, Vercel siguió sirviendo el último despliegue bueno (sin caída).
+
+**Cambios:**
+
+- Infraestructura: variable temporal `VERCEL_FORCE_NO_BUILD_CACHE=1` (Production), `vercel redeploy` del despliegue fallido con target production, y eliminación de la variable al terminar. Sin cambios de código.
+
+**Verificación:** el despliegue sin caché quedó `Ready` con alias `www.tiendamotek.com`. En producción: `robots.txt` con las reglas nuevas, `/manifest.webmanifest` y `/apple-icon.png` responden 200, título de `/contacto` sin duplicar, canónicas correctas en portada, catálogo, producto y contacto, y sitemap sin `/auth`. Si el error reaparece en un build futuro, repetir el redeploy sin caché.
