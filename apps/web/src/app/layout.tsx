@@ -66,7 +66,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="es-CO" className={`${oswald.variable} ${roboto.variable} h-full antialiased`} suppressHydrationWarning>
       <body className="min-h-full flex flex-col bg-white text-gray-900" suppressHydrationWarning>
         <AuthSessionProvider>{children}</AuthSessionProvider>
-        <Toaster theme="dark" position="bottom-right" richColors closeButton />
+        <Toaster theme="dark" position="bottom-left" mobileOffset={{ bottom: 80 }} richColors closeButton />
         <Analytics />
         <SpeedInsights />
       </body>
