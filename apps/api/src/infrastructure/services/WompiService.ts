@@ -59,7 +59,10 @@ export class WompiService implements IPaymentService {
   async createTransaction(order: Order): Promise<PaymentResult> {
     const reference = `ORDER-${order.id}-${Date.now()}`
     const currency = 'COP'
-    const amountInCents = order.total
+    // COD con anticipo: se cobra solo el anticipo; el saldo lo recauda el repartidor.
+    const amountInCents = order.codDepositAmount && order.codDepositAmount > 0
+      ? order.codDepositAmount
+      : order.total
 
     const integritySignature = WompiService.computeIntegritySignature(
       reference,
