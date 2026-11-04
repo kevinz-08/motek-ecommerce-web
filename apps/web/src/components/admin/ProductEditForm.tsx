@@ -68,6 +68,7 @@ export function ProductEditForm({ product, categories, initialBenefits = [], ini
     slug: product?.slug ?? '',
     description: product?.description ?? '',
     price: product ? String(product.price / 100) : '',
+    compareAtPrice: product?.compareAtPrice != null ? String(product.compareAtPrice / 100) : '',
     stock: product ? String(product.stock) : '0',
     sku: product?.sku ?? '',
     categoryId: product?.categoryId ?? (categories[0]?.id ?? ''),
@@ -142,6 +143,8 @@ export function ProductEditForm({ product, categories, initialBenefits = [], ini
     const payload = {
       ...form,
       price: Math.round(parseFloat(form.price) * 100),
+      // null = sin precio ancla (en edición lo quita); el servidor valida que sea > price.
+      compareAtPrice: form.compareAtPrice.trim() ? Math.round(parseFloat(form.compareAtPrice) * 100) : null,
       stock: parseInt(form.stock, 10),
       images,
       weightKg: form.weightKg.trim() ? parseFloat(form.weightKg) : undefined,
@@ -402,6 +405,16 @@ export function ProductEditForm({ product, categories, initialBenefits = [], ini
               onChange={(e) => setForm({ ...form, price: e.target.value })}
               placeholder="85000"
               hint="En pesos (sin centavos)"
+            />
+            <Input
+              label="Precio anterior (COP)"
+              type="number"
+              min="0"
+              step="100"
+              value={form.compareAtPrice}
+              onChange={(e) => setForm({ ...form, compareAtPrice: e.target.value })}
+              placeholder="100000"
+              hint="Opcional. Se muestra tachado; debe ser mayor al precio y haber sido un precio real de venta."
             />
             <Input
               label="Stock"

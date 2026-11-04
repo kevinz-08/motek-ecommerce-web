@@ -23,6 +23,7 @@ import { TurnstileWidget } from './TurnstileWidget'
 import { CitySelector } from './CitySelector'
 import { apiClient, type ApiResponse } from '@/lib/api-client'
 import { useShippingQuote } from '@/lib/shipping-quote'
+import { cartSavings } from '@/lib/pricing'
 import { STORE_ADDRESS, STORE_CITY, STORE_MAP_EMBED_URL } from '@/lib/contact'
 
 type PaymentMethod = 'WOMPI' | 'COD'
@@ -150,6 +151,7 @@ export function CheckoutForm({
   })
 
   const cartTotal = total()
+  const savings = cartSavings(items)
   const shippingItems = items.map((i) => ({ productId: i.product.id, quantity: i.quantity }))
   const quotePaymentMethod = paymentMethod === 'COD' ? 'COD' : 'EXTERNAL_PAYMENT'
   // Retiro en tienda: no hay nada que cotizar — se pasa `null` para que el hook
@@ -895,6 +897,12 @@ export function CheckoutForm({
             ))}
           </div>
           <div className="border-t border-gray-100 pt-4 space-y-2">
+            {savings > 0 && (
+              <div className="flex justify-between text-sm text-green-700">
+                <span className="font-medium">Estás ahorrando</span>
+                <span className="font-semibold">{formatCOP(savings)}</span>
+              </div>
+            )}
             {appliedCoupon && (
               <div className="flex justify-between text-sm text-green-700">
                 <span className="font-medium">Descuento ({appliedCoupon.code})</span>
