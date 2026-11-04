@@ -1,11 +1,12 @@
 import {
   Controller, Get, Post, Param, Body, HttpCode, Inject, Res, Logger,
-  UnprocessableEntityException,
+  UnprocessableEntityException, NotFoundException,
 } from '@nestjs/common'
 import type { Response } from 'express'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { VendeloService } from '../infrastructure/services/VendeloService'
+import { VendeloOrderQueueService } from '../infrastructure/services/VendeloOrderQueueService'
 import { PrismaService } from '../infrastructure/database/prisma.service'
 import {
   CreateShipments,
@@ -32,9 +33,32 @@ export class VendeloController {
     private readonly vendeloService: VendeloService,
     private readonly prisma: PrismaService,
     private readonly shippingAdmin: ShippingAdminService,
+    private readonly orderQueue: VendeloOrderQueueService,
     @Inject(ORDER_REPOSITORY) private readonly orderRepo: IOrderRepository,
     @Inject(VENDELO_SHIPPING_PORT) private readonly shippingPort: IVendeloShippingPort,
   ) {}
+
+  /** Estado consolidado del despacho de un pedido: cola, Vendelo, guía y acciones posibles. */
+  @Get('orders/:orderId/shipping-status')
+  @ApiOperation({ summary: 'Estado consolidado del despacho de un pedido (cola + Vendelo + guía)' })
+  async getShippingStatus(@Param('orderId') orderId: string) {
+    const status = await this.shippingAdmin.getShippingStatus(orderId)
+    if (!status) throw new NotFoundException('Pedido no encontrado')
+    return status
+  }
+
+  /** Reintenta el despacho de un pedido que quedó FAILED en la cola (guards de idempotencia en requeue). */
+  @Post('orders/:orderId/requeue')
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Reencola un pedido cuyo despacho a Vendelo falló' })
+  async requeueOrder(@Param('orderId') orderId: string) {
+    const result = await this.orderQueue.requeue(orderId)
+    if (!result.requeued) {
+      this.logger.warn(`requeueOrder orderId=${orderId} rechazado: ${result.reason}`)
+      throw new UnprocessableEntityException(result.reason)
+    }
+    return { requeued: true }
+  }
 
   @Get('health')
   @ApiOperation({ summary: 'Smoke test: verifica conectividad y autenticación con Vendelo API' })

@@ -27,6 +27,7 @@ interface OrderRow {
   userId: string
   status?: string
   vendeloOrderId: string | null
+  deliveryMethod?: string
   shippingAddress: unknown
   buyerIdType: string
   buyerIdNumber: string
@@ -52,6 +53,8 @@ interface PrismaMock {
   client: {
     vendeloOrderQueue: {
       findMany: MockedFunction<(args: unknown) => Promise<QueueRow[]>>
+      findFirst: MockedFunction<(args: unknown) => Promise<QueueRow | null>>
+      create: MockedFunction<(args: unknown) => Promise<unknown>>
       updateMany: MockedFunction<(args: unknown) => Promise<{ count: number }>>
       update: MockedFunction<(args: unknown) => Promise<QueueRow>>
     }
@@ -115,6 +118,8 @@ function makePrismaMock(): PrismaMock {
     client: {
       vendeloOrderQueue: {
         findMany: vi.fn().mockResolvedValue([]),
+        findFirst: vi.fn().mockResolvedValue(null),
+        create: vi.fn().mockResolvedValue({}),
         updateMany: vi.fn().mockResolvedValue({ count: 1 }),
         update: vi.fn().mockResolvedValue(makeQueueRow()),
       },
@@ -281,6 +286,91 @@ describe('VendeloOrderQueueService', () => {
         nextRetry: expect.any(Date),
         processingStartedAt: null,
       },
+    })
+  })
+
+  // ── requeue() — acción "Reintentar envío a Vendelo" del panel admin ────────
+
+  describe('requeue()', () => {
+    it('resetea la fila FAILED a PENDING/0 en vez de crear una nueva', async () => {
+      prismaMock.client.order.findUnique.mockResolvedValue(makeOrderRow())
+      prismaMock.client.vendeloOrderQueue.findFirst.mockResolvedValue(
+        makeQueueRow({ status: 'FAILED', attempts: 3, lastError: 'Vendelo API 500' }),
+      )
+
+      const result = await service.requeue('order-001')
+
+      expect(result).toEqual({ requeued: true })
+      expect(prismaMock.client.vendeloOrderQueue.update).toHaveBeenCalledWith({
+        where: { id: 'queue-001' },
+        data: {
+          status: 'PENDING',
+          attempts: 0,
+          lastError: null,
+          nextRetry: expect.any(Date),
+          processingStartedAt: null,
+        },
+      })
+      // Una segunda fila significaría dos createOrder → pedido duplicado en Vendelo.
+      expect(prismaMock.client.vendeloOrderQueue.create).not.toHaveBeenCalled()
+    })
+
+    it('encola por primera vez si el pedido nunca tuvo fila de cola', async () => {
+      prismaMock.client.order.findUnique.mockResolvedValue(makeOrderRow())
+      prismaMock.client.vendeloOrderQueue.findFirst.mockResolvedValue(null)
+
+      const result = await service.requeue('order-001')
+
+      expect(result).toEqual({ requeued: true })
+      expect(prismaMock.client.vendeloOrderQueue.create).toHaveBeenCalledWith({
+        data: { orderId: 'order-001', status: 'PENDING' },
+      })
+    })
+
+    it('rechaza si el pedido ya existe en Vendelo (reintentarlo lo duplicaría)', async () => {
+      prismaMock.client.order.findUnique.mockResolvedValue(makeOrderRow({ vendeloOrderId: 'vendelo-order-001' }))
+
+      const result = await service.requeue('order-001')
+
+      expect(result.requeued).toBe(false)
+      expect(prismaMock.client.vendeloOrderQueue.update).not.toHaveBeenCalled()
+      expect(prismaMock.client.vendeloOrderQueue.create).not.toHaveBeenCalled()
+    })
+
+    it('rechaza los pedidos de retiro en tienda', async () => {
+      prismaMock.client.order.findUnique.mockResolvedValue(makeOrderRow({ deliveryMethod: 'STORE_PICKUP' }))
+
+      const result = await service.requeue('order-001')
+
+      expect(result.requeued).toBe(false)
+      expect(prismaMock.client.vendeloOrderQueue.create).not.toHaveBeenCalled()
+    })
+
+    it('rechaza los pedidos anulados', async () => {
+      prismaMock.client.order.findUnique.mockResolvedValue(makeOrderRow({ status: 'CANCELLED' }))
+
+      const result = await service.requeue('order-001')
+
+      expect(result.requeued).toBe(false)
+      expect(prismaMock.client.vendeloOrderQueue.create).not.toHaveBeenCalled()
+    })
+
+    it('rechaza si la fila ya está en vuelo (PENDING/PROCESSING)', async () => {
+      prismaMock.client.order.findUnique.mockResolvedValue(makeOrderRow())
+      prismaMock.client.vendeloOrderQueue.findFirst.mockResolvedValue(makeQueueRow({ status: 'PROCESSING' }))
+
+      const result = await service.requeue('order-001')
+
+      expect(result.requeued).toBe(false)
+      expect(prismaMock.client.vendeloOrderQueue.update).not.toHaveBeenCalled()
+    })
+
+    it('rechaza si el pedido no existe', async () => {
+      prismaMock.client.order.findUnique.mockResolvedValue(null)
+
+      const result = await service.requeue('order-inexistente')
+
+      expect(result.requeued).toBe(false)
     })
   })
 })
