@@ -138,7 +138,30 @@ describe('CreateOrder', () => {
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       total: product.price * 3,
-      items: [{ productId: 'prod-1', quantity: 3, priceAtPurchase: product.price }],
+      items: [{ productId: 'prod-1', quantity: 3, priceAtPurchase: product.price, compareAtPriceAtPurchase: null }],
+    }))
+  })
+
+  it('guarda el precio ancla vigente en el ítem solo si es mayor al precio', async () => {
+    const anchored = makeProduct({ price: 3000000, compareAtPrice: 4000000 })
+    const order = makeOrder({ total: anchored.price })
+    const productRepo = { findById: vi.fn().mockResolvedValue(anchored) } as unknown as IProductRepository
+    const create = vi.fn().mockResolvedValue(order)
+    const orderRepo = { create } as unknown as IOrderRepository
+    const paymentService = {
+      createTransaction: vi.fn().mockResolvedValue({ externalId: null, reference: 'ref', integritySignature: 'sig', publicKey: 'pk', amountInCents: order.total, currency: 'COP' }),
+    } as unknown as IPaymentService
+
+    await new CreateOrder(orderRepo, productRepo, paymentService).execute({
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
+      items: [{ productId: 'prod-1', quantity: 1 }],
+      shippingAddress: SHIPPING,
+      buyer: { idType: 'CC', idNumber: '1000123456' },
+      paymentProvider: 'WOMPI',
+    })
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      items: [expect.objectContaining({ priceAtPurchase: 3000000, compareAtPriceAtPurchase: 4000000 })],
     }))
   })
 

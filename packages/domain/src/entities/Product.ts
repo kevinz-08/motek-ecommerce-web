@@ -41,6 +41,12 @@ export interface Product {
   description: string
   /** Precio en centavos de COP. $85.000 COP = 8500000 */
   price: number
+  /**
+   * Precio de referencia tachado ("antes") en centavos COP. null/undefined = sin precio ancla.
+   * Invariante: si existe, es estrictamente mayor que `price` (ver validateProductPricing).
+   * Opcional en el tipo porque no todos los queries lo seleccionan.
+   */
+  compareAtPrice?: number | null
   /** Unidades disponibles en inventario. 0 = agotado */
   stock: number
   /** Código de referencia único del producto. Ej: "FRE-BRE-FZ25-001" */
@@ -105,4 +111,38 @@ export interface ProductFilters {
   page?: number
   /** Cantidad de productos por página. Default: 12 */
   limit?: number
+}
+
+/**
+ * Valida la pareja precio / precio ancla antes de persistir.
+ * Retorna un mensaje de error legible o null si es válida.
+ *
+ * Reglas:
+ *   - price es un entero ≥ 0 (centavos COP).
+ *   - compareAtPrice, si existe, es un entero estrictamente mayor que price
+ *     (un "antes" igual o menor al precio real sería publicidad engañosa).
+ */
+export function validateProductPricing(price: number, compareAtPrice: number | null | undefined): string | null {
+  if (!Number.isInteger(price) || price < 0) {
+    return 'El precio debe ser un entero mayor o igual a 0 (centavos COP)'
+  }
+  if (compareAtPrice === null || compareAtPrice === undefined) return null
+  if (!Number.isInteger(compareAtPrice) || compareAtPrice <= price) {
+    return 'El precio de referencia (antes) debe ser mayor que el precio de venta'
+  }
+  return null
+}
+
+/**
+ * Porcentaje de descuento entero (redondeado hacia abajo) que representa price frente a compareAtPrice.
+ * Retorna 0 si no hay precio ancla válido. Se redondea hacia abajo para nunca exagerar el descuento.
+ */
+export function getDiscountPercent(price: number, compareAtPrice: number | null | undefined): number {
+  if (!compareAtPrice || compareAtPrice <= price) return 0
+  return Math.floor(((compareAtPrice - price) / compareAtPrice) * 100)
+}
+
+/** true si el producto tiene un precio ancla válido para mostrar tachado. */
+export function hasCompareAtPrice(product: Pick<Product, 'price' | 'compareAtPrice'>): boolean {
+  return getDiscountPercent(product.price, product.compareAtPrice) > 0
 }

@@ -170,6 +170,9 @@ model Product {
   slug                  String                    @unique
   description           String                    @db.Text
   price                 Int                       // centavos COP
+  /// Precio de referencia tachado ("antes"). Null = sin precio ancla.
+  /// CHECK en BD: compareAtPrice IS NULL OR compareAtPrice > price.
+  compareAtPrice        Int?                      // centavos COP
   stock                 Int                       @default(0)
   sku                   String                    @unique
   images                String[]
@@ -191,6 +194,7 @@ model Product {
   orderItems            OrderItem[]
   structuredDescription ProductDescription?
   coupons               Coupon[]                  @relation("ProductCoupons")
+  priceHistory          ProductPriceHistory[]
 
   /// Cubre el filtro mas comun del catalogo y del admin: por categoria, activos, con stock.
   @@index([categoryId, isActive, stock])
@@ -198,6 +202,21 @@ model Product {
   @@index([isActive, createdAt])
   /// Cubre el filtro de papelera y excluye soft-deleted de todas las queries normales.
   @@index([deletedAt])
+}
+
+/// Historial de cambios de precio. Respaldo de que el precio de referencia
+/// (compareAtPrice) fue un precio realmente cobrado — Ley 1480 / SIC.
+model ProductPriceHistory {
+  id             String   @id @default(cuid())
+  productId      String
+  price          Int      // centavos COP
+  compareAtPrice Int?     // centavos COP
+  /// ADMIN_CREATE | ADMIN_UPDATE | ERP_SYNC
+  source         String
+  changedAt      DateTime @default(now())
+  product        Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId, changedAt])
 }
 
 model ProductDescription {
@@ -375,6 +394,8 @@ model OrderItem {
   productId       String
   quantity        Int
   priceAtPurchase Int     // centavos COP — precio al momento de la compra
+  /// centavos COP — precio ancla vigente al comprar (null si no había). Solo informativo.
+  compareAtPriceAtPurchase Int?
   order           Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
   product         Product @relation(fields: [productId], references: [id])
 }

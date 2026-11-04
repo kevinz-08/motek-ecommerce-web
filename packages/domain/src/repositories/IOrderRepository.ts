@@ -32,7 +32,13 @@ export interface CreateOrderInput {
    */
   customer: OrderCustomer
   /** Lista de ítems con precio capturado en el momento de la compra */
-  items: Array<{ productId: string; quantity: number; priceAtPurchase: number }>
+  items: Array<{
+    productId: string
+    quantity: number
+    priceAtPurchase: number
+    /** Precio ancla vigente al comprar (centavos COP). null si no había. */
+    compareAtPriceAtPurchase?: number | null
+  }>
   /** Dirección de envío — se serializa como JSON en la BD */
   shippingAddress: ShippingAddress
   /** Método de entrega elegido en el checkout. Ver Order.deliveryMethod. */

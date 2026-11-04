@@ -84,6 +84,8 @@ export interface OrderItem {
    * Capturado por CreateOrder para preservar el histórico de precios.
    */
   priceAtPurchase: number
+  /** Precio ancla (tachado) vigente al comprar, en centavos COP. null/undefined si no había. */
+  compareAtPriceAtPurchase?: number | null
   /**
    * Datos del producto al momento de leer el pedido — opcional, solo presente
    * cuando el caller hizo include de la relación product. Usado por VendeloService

@@ -145,6 +145,7 @@ export class CreateOrder {
       productId: string
       quantity: number
       priceAtPurchase: number
+      compareAtPriceAtPurchase: number | null
       /** Solo para validación de cupón — se elimina antes de persistir. */
       _categoryId: string
       _parentCategoryId: string | null
@@ -178,6 +179,9 @@ export class CreateOrder {
         productId: found.id,
         quantity: item.quantity,
         priceAtPurchase: found.price,
+        compareAtPriceAtPurchase: found.compareAtPrice != null && found.compareAtPrice > found.price
+          ? found.compareAtPrice
+          : null,
         // Guardamos categoryId y parentCategoryId para la validación de cupón.
         // No forman parte de CreateOrderInput — son solo datos de trabajo locales.
         _categoryId: found.categoryId,
