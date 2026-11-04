@@ -144,6 +144,7 @@ Debe ser segura ante disparos concurrentes (claims atómicos / idempotencia).
 
 ## Stock & Payment Patterns
 
+- **Contraentrega (COD) tiene estados propios**: `AWAITING_DEPOSIT` (falta el anticipo) y `COD_CONFIRMED` (confirmado; el saldo se cobra en la puerta). Nunca `PAID`/`PENDING` para COD; la API rechaza mezclarlos. Con `Settings.COD_DEPOSIT_AMOUNT > 0` el pedido a domicilio nace `AWAITING_DEPOSIT`, el único `Payment` es el anticipo por Wompi (`Order.codDepositAmount`) y `ConfirmPayment` lo pasa a `COD_CONFIRMED` + descuenta stock. Retiro en tienda está exento. Vendelo recibe el anticipo prorrateado en `unit_price` (`prorateDepositIntoUnitPrices`). `CancelOrder` repone stock de `PAID` y `COD_CONFIRMED`.
 - Stock is **not** decremented on order creation — only when a payment webhook fires `APPROVED`.
 - `decrementStock(id, quantity)` is atomic; safe for concurrent webhooks.
 - Both Wompi and Mercado Pago webhooks are idempotent — `ConfirmPayment` checks `order.status` before acting.
