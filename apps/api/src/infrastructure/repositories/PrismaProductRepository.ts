@@ -10,7 +10,7 @@ import { PrismaService } from '../database/prisma.service'
 
 type PrismaProductRow = {
   id: string; name: string; slug: string; description: string
-  price: number; stock: number; sku: string; images: string[]
+  price: number; compareAtPrice: number | null; stock: number; sku: string; images: string[]
   isActive: boolean; categoryId: string; createdAt: Date; updatedAt: Date; deletedAt: Date | null
   weightKg: number | null; heightCm: number | null; widthCm: number | null; lengthCm: number | null
   compatible?: Array<{ id: string; productId: string; brand: string; model: string; year: number | null }>
@@ -24,6 +24,7 @@ function toDomain(p: PrismaProductRow): Product {
     slug: p.slug,
     description: p.description,
     price: p.price,
+    compareAtPrice: p.compareAtPrice,
     stock: p.stock,
     sku: p.sku,
     images: p.images,
@@ -134,13 +135,17 @@ export class PrismaProductRepository implements IProductRepository {
     const p = await this.prisma.client.product.create({
       data: {
         name: data.name, slug: data.slug, description: data.description,
-        price: data.price, stock: data.stock, sku: data.sku,
+        price: data.price, compareAtPrice: data.compareAtPrice ?? null,
+        stock: data.stock, sku: data.sku,
         images: data.images, isActive: data.isActive, categoryId: data.categoryId,
         weightKg: data.weightKg ?? null, heightCm: data.heightCm ?? null,
         widthCm: data.widthCm ?? null, lengthCm: data.lengthCm ?? null,
         compatible: data.compatible
           ? { create: data.compatible.map(({ id: _id, ...c }) => c) }
           : undefined,
+        priceHistory: {
+          create: { price: data.price, compareAtPrice: data.compareAtPrice ?? null, source: 'ADMIN_CREATE' },
+        },
       },
       include: { compatible: true },
     })
@@ -148,6 +153,11 @@ export class PrismaProductRepository implements IProductRepository {
   }
 
   async update(id: string, data: Partial<Product>): Promise<Product> {
+    const pricingTouched = data.price !== undefined || data.compareAtPrice !== undefined
+    const before = pricingTouched
+      ? await this.prisma.client.product.findUnique({ where: { id }, select: { price: true, compareAtPrice: true } })
+      : null
+
     const p = await this.prisma.client.product.update({
       where: { id },
       data: {
@@ -155,6 +165,7 @@ export class PrismaProductRepository implements IProductRepository {
         ...(data.slug        !== undefined && { slug:        data.slug }),
         ...(data.description !== undefined && { description: data.description }),
         ...(data.price       !== undefined && { price:       data.price }),
+        ...(data.compareAtPrice !== undefined && { compareAtPrice: data.compareAtPrice }),
         ...(data.stock       !== undefined && { stock:       data.stock }),
         ...(data.sku         !== undefined && { sku:         data.sku }),
         ...(data.images      !== undefined && { images:      data.images }),
@@ -174,6 +185,12 @@ export class PrismaProductRepository implements IProductRepository {
       },
       include: { compatible: true },
     })
+
+    if (before && (before.price !== p.price || before.compareAtPrice !== p.compareAtPrice)) {
+      await this.prisma.client.productPriceHistory.create({
+        data: { productId: id, price: p.price, compareAtPrice: p.compareAtPrice, source: 'ADMIN_UPDATE' },
+      })
+    }
     return toDomain(p)
   }
 

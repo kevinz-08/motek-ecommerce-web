@@ -40,7 +40,7 @@ type PrismaOrderRow = {
   shippingAddress: unknown; paymentProvider: string; shippingTotal: number; createdAt: Date
   deliveryMethod: string
   buyerIdType: string; buyerIdNumber: string; buyerBusinessName: string | null
-  items?: Array<{ id: string; orderId: string; productId: string; quantity: number; priceAtPurchase: number }>
+  items?: Array<{ id: string; orderId: string; productId: string; quantity: number; priceAtPurchase: number; compareAtPriceAtPurchase: number | null }>
   payment?: { id: string; orderId: string; provider: string; externalId: string | null; status: string; amount: number; createdAt: Date } | null
 }
 
@@ -51,6 +51,7 @@ function toDomainItem(i: NonNullable<PrismaOrderRow['items']>[number]): OrderIte
     productId: i.productId,
     quantity: i.quantity,
     priceAtPurchase: i.priceAtPurchase,
+    compareAtPriceAtPurchase: i.compareAtPriceAtPurchase,
   }
 }
 
