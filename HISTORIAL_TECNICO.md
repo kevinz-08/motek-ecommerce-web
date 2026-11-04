@@ -957,3 +957,20 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Infraestructura: variable temporal `VERCEL_FORCE_NO_BUILD_CACHE=1` (Production), `vercel redeploy` del despliegue fallido con target production, y eliminación de la variable al terminar. Sin cambios de código.
 
 **Verificación:** el despliegue sin caché quedó `Ready` con alias `www.tiendamotek.com`. En producción: `robots.txt` con las reglas nuevas, `/manifest.webmanifest` y `/apple-icon.png` responden 200, título de `/contacto` sin duplicar, canónicas correctas en portada, catálogo, producto y contacto, y sitemap sin `/auth`. Si el error reaparece en un build futuro, repetir el redeploy sin caché.
+
+---
+
+## 2026-11-03 — Apartado "Guía Vendelo" en el admin de pedidos (reintento de despacho y guía PDF)
+
+**Problema/Motivo:** Un pedido COD de prueba (domingo 2026-11-01) no generó guía. El webhook de Wompi no interviene en COD (el pedido se encola en `VendeloOrderQueue` al crearse). El hueco real: crear el pedido en Vendelo no produce la guía — hacen falta `create-shipments` y `generate-labels`, que existían solo como endpoints de la API sin UI, y un despacho fallido (`FAILED`) solo dejaba una alerta en stderr. Portado desde `electro-motos-tdk` (entrada #148).
+
+**Cambios:**
+
+- `apps/api/src/infrastructure/services/VendeloOrderQueueService.ts` — `MAX_ATTEMPTS` exportado, `findByOrderId()` y `requeue()` (resetea la fila existente en vez de crear otra para no duplicar el pedido en Vendelo; rechaza pedidos ya en Vendelo, retiro en tienda, anulados o en vuelo; espera a que termine el procesamiento por el CPU limitado de Cloud Run).
+- `apps/api/src/vendelo/services/shipping-admin.service.ts` — `getShippingStatus()` (cola + `vendeloOrderId` + `Shipment` + flags `actions` calculados en el servidor).
+- `apps/api/src/vendelo/vendelo.controller.ts` — `GET admin/vendelo/orders/:orderId/shipping-status` y `POST admin/vendelo/orders/:orderId/requeue` (`@Roles('ADMIN')`).
+- `apps/web/src/lib/admin-vendelo-proxy.ts` y `apps/web/src/app/api/admin/vendelo/orders/[id]/{route,requeue,shipment,guia}` — BFF delgado hacia NestJS (la guía se sirve como PDF).
+- `apps/web/src/components/admin/VendeloGuiaSection.tsx` (nuevo) y `OrderInfoModal.tsx` — sección con estado del despacho, "Reintentar envío a Vendelo", "Generar guía", "Ver/Descargar guía PDF".
+- `apps/api/src/__tests__/VendeloOrderQueueService.test.ts` — 7 tests de `requeue()`.
+
+**Verificación:** `tsc --noEmit` limpio en `apps/api` y `apps/web`; tests de `VendeloOrderQueueService` 17/17. Pendiente: diagnóstico del pedido del domingo en producción (requiere acceso a `motek-app-web`/BD).
