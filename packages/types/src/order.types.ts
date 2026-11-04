@@ -2,7 +2,7 @@ import type { PaymentProvider } from './product.types'
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
-export type OrderStatus = 'PENDING' | 'PAID' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED'
+export type OrderStatus = 'PENDING' | 'PAID' | 'AWAITING_DEPOSIT' | 'COD_CONFIRMED' | 'SHIPPED' | 'DELIVERED' | 'CANCELLED'
 export type PaymentStatus = 'APPROVED' | 'DECLINED' | 'VOIDED' | 'ERROR' | 'PENDING'
 
 // ── Requests ─────────────────────────────────────────────────────────────────

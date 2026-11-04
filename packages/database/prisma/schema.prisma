@@ -17,6 +17,11 @@ enum Role {
 enum OrderStatus {
   PENDING
   PAID
+  /// Solo contraentrega (COD): pedido creado, falta pagar el anticipo pre-envío (Wompi).
+  AWAITING_DEPOSIT
+  /// Solo contraentrega (COD): pedido confirmado (anticipo pagado o sin anticipo);
+  /// el saldo se cobra en la puerta. Equivalente a PAID para pagos en línea.
+  COD_CONFIRMED
   SHIPPED
   DELIVERED
   CANCELLED
@@ -301,6 +306,10 @@ model Order {
   /// y excluye el pedido de la cola de envíos Vendelo (VendeloOrderQueueService).
   deliveryMethod     DeliveryMethod  @default(HOME_DELIVERY)
   paymentProvider    PaymentProvider
+  /// centavos COP — anticipo pre-envío de un pedido contraentrega (0 = sin anticipo).
+  /// Se cobra por Wompi (el único Payment del pedido es ese anticipo) y se descuenta
+  /// del cobro en la puerta: saldo = total - codDepositAmount.
+  codDepositAmount   Int               @default(0)
   /// ID del pedido creado en Vendelo API. Null hasta que VendeloOrderQueueService lo procesa.
   vendeloOrderId     String?
   /// Timestamp del momento exacto en que el usuario marcó el checkbox de políticas en el checkout.
