@@ -15,6 +15,7 @@ import { useState, useCallback } from 'react'
 import { Info } from 'lucide-react'
 import { Modal } from '@/components/ui/Modal'
 import { Badge, type BadgeVariant } from '@/components/ui/Badge'
+import { VendeloGuiaSection } from './VendeloGuiaSection'
 
 interface OrderDetails {
   id: string
@@ -176,6 +177,9 @@ export function OrderInfoModal({ orderId }: { orderId: string }) {
               )}
               {data.vendeloOrderId && <KV label="ID Vendelo" value={data.vendeloOrderId} mono />}
             </Section>
+
+            {/* Guía Vendelo: estado del despacho + acciones correctivas (hace su propio fetch). */}
+            <VendeloGuiaSection orderId={orderId} />
 
             {/* Items */}
             <Section title="Productos">
