@@ -1,6 +1,8 @@
 const STATUS_MAP = {
   PENDING:   { label: 'Pendiente de pago', className: 'bg-amber-400/15 text-amber-400 ring-amber-400/30' },
   PAID:      { label: 'Pago confirmado',   className: 'bg-green-400/15 text-green-400 ring-green-400/30' },
+  AWAITING_DEPOSIT: { label: 'Falta el anticipo', className: 'bg-amber-400/15 text-amber-400 ring-amber-400/30' },
+  COD_CONFIRMED:    { label: 'Pedido confirmado', className: 'bg-green-400/15 text-green-400 ring-green-400/30' },
   SHIPPED:   { label: 'En camino',         className: 'bg-sky-400/15 text-sky-400 ring-sky-400/30' },
   DELIVERED: { label: 'Entregado',         className: 'bg-emerald-400/15 text-emerald-400 ring-emerald-400/30' },
   CANCELLED: { label: 'Cancelado',         className: 'bg-red-400/15 text-red-400 ring-red-400/30' },

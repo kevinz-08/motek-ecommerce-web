@@ -1,15 +1,17 @@
 import { prisma } from '@/infrastructure/database/prisma-client'
 import { MercadoPagoToggle } from '@/components/admin/MercadoPagoToggle'
 import { CodToggle } from '@/components/admin/CodToggle'
+import { CodDepositForm } from '@/components/admin/CodDepositForm'
 import { ShippingOnlineToggle } from '@/components/admin/ShippingOnlineToggle'
 import { GuestCheckoutToggle } from '@/components/admin/GuestCheckoutToggle'
 import { Card, CardHeader, CardTitle, CardBody } from '@/components/ui/Card'
 import { Badge } from '@/components/ui/Badge'
 
 export default async function AdminConfigPage() {
-  const [mpSetting, codSetting, shippingOnlineSetting, guestSetting] = await Promise.all([
+  const [mpSetting, codSetting, codDepositSetting, shippingOnlineSetting, guestSetting] = await Promise.all([
     prisma.settings.findUnique({ where: { key: 'MERCADOPAGO_ENABLED' } }),
     prisma.settings.findUnique({ where: { key: 'COD_ENABLED' } }),
+    prisma.settings.findUnique({ where: { key: 'COD_DEPOSIT_AMOUNT' } }),
     prisma.settings.findUnique({ where: { key: 'SHIPPING_ONLINE_ENABLED' } }),
     prisma.settings.findUnique({ where: { key: 'GUEST_CHECKOUT_ENABLED' } }),
   ])
@@ -17,6 +19,8 @@ export default async function AdminConfigPage() {
   const mpEnabled = mpSetting?.value === 'true'
   // Por defecto habilitado si no existe la fila aún — mismo fallback que orders.controller.ts.
   const codEnabled = codSetting ? codSetting.value === 'true' : true
+  // Centavos COP. 0 / sin fila = sin anticipo (mismo default que orders.controller.ts).
+  const codDepositCents = Math.max(0, parseInt(codDepositSetting?.value ?? '0', 10) || 0)
   // Default FALSE si no existe la fila — no empezar a cobrar flete extra sin
   // opt-in explícito del admin (mismo criterio que orders.controller.ts).
   const shippingOnlineEnabled = shippingOnlineSetting?.value === 'true'
@@ -88,6 +92,15 @@ export default async function AdminConfigPage() {
                 </p>
               </div>
               <CodToggle enabled={codEnabled} />
+            </div>
+
+            <div className="mt-4 p-4 bg-[var(--c-surface-2)] border border-[var(--c-border)] rounded-[var(--radius-md)]">
+              <p className="font-semibold text-[var(--c-text)]">Anticipo pre-envío</p>
+              <p className="text-xs text-[var(--c-text-3)] mb-3">
+                Valor que el cliente paga por Wompi antes del despacho; se descuenta de lo que paga al recibir.
+                El retiro en tienda está exento. 0 = sin anticipo (los pedidos nacen confirmados).
+              </p>
+              <CodDepositForm initialCents={codDepositCents} />
             </div>
           </CardBody>
         </Card>

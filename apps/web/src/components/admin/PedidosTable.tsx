@@ -78,7 +78,7 @@ export function PedidosTable({ orders }: { orders: OrderRow[] }) {
     {
       key: 'change-status',
       header: 'Cambiar estado',
-      cell: (o) => <OrderStatusSelect orderId={o.id} currentStatus={o.status as OrderStatus} />,
+      cell: (o) => <OrderStatusSelect orderId={o.id} currentStatus={o.status as OrderStatus} paymentProvider={o.paymentProvider} />,
     },
     {
       key: 'actions',

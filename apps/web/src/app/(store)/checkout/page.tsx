@@ -19,13 +19,17 @@ export const metadata: Metadata = {
 export default async function CheckoutPage() {
   const session = await auth()
 
-  const [codSetting, shippingOnlineSetting, guestSetting] = await Promise.all([
+  const [codSetting, codDepositSetting, shippingOnlineSetting, guestSetting] = await Promise.all([
     prisma.settings.findUnique({ where: { key: 'COD_ENABLED' } }),
+    prisma.settings.findUnique({ where: { key: 'COD_DEPOSIT_AMOUNT' } }),
     prisma.settings.findUnique({ where: { key: 'SHIPPING_ONLINE_ENABLED' } }),
     prisma.settings.findUnique({ where: { key: 'GUEST_CHECKOUT_ENABLED' } }),
   ])
   // Por defecto habilitado si no existe la fila aún — mismo fallback que orders.controller.ts.
   const codEnabled = codSetting ? codSetting.value === 'true' : true
+  // Anticipo pre-envío de contraentrega (centavos). 0 / sin fila = desactivado. Solo informativo:
+  // el backend lee su propio valor al crear el pedido.
+  const codDepositCents = Math.max(0, parseInt(codDepositSetting?.value ?? '0', 10) || 0)
   // Default FALSE si no existe la fila — no empezar a cobrar flete extra sin
   // opt-in explícito del admin (mismo criterio que orders.controller.ts).
   const shippingOnlineEnabled = shippingOnlineSetting?.value === 'true'
@@ -43,6 +47,7 @@ export default async function CheckoutPage() {
         guestCheckoutEnabled={guestCheckoutEnabled}
         turnstileSiteKey={process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY ?? ''}
         codEnabled={codEnabled}
+        codDepositCents={codDepositCents}
         shippingOnlineEnabled={shippingOnlineEnabled}
       />
     </div>

@@ -23,6 +23,7 @@ interface OrderDetails {
   status: string
   total: number
   shippingTotal: number
+  codDepositAmount: number
   paymentProvider: string
   vendeloOrderId: string | null
   policiesAcceptedAt: string | null
@@ -69,6 +70,8 @@ function formatDateTime(d: string): string {
 const STATUS_VARIANT: Record<string, BadgeVariant> = {
   PENDING: 'warning',
   PAID: 'success',
+  AWAITING_DEPOSIT: 'warning',
+  COD_CONFIRMED: 'success',
   APPROVED: 'success',
   SHIPPED: 'info',
   DELIVERED: 'success',
@@ -233,6 +236,15 @@ export function OrderInfoModal({ orderId }: { orderId: string }) {
                 <KV label="Pasarela" value={data.payment.provider} />
                 {data.payment.externalId && <KV label="ID transacción" value={data.payment.externalId} mono />}
                 <KV label="Procesado" value={formatDateTime(data.payment.createdAt)} />
+              </Section>
+            )}
+
+            {/* Anticipo de contraentrega: el único Payment es el cobro Wompi del anticipo;
+                el saldo lo recauda el repartidor en la puerta. */}
+            {data.paymentProvider === 'COD' && data.codDepositAmount > 0 && (
+              <Section title="Anticipo de contraentrega">
+                <KV label="Anticipo" value={`${formatCOP(data.codDepositAmount)} — ${data.status === 'AWAITING_DEPOSIT' ? 'pendiente de pago' : 'pagado'}`} />
+                <KV label="Saldo en la puerta" value={formatCOP(Math.max(0, data.total - data.codDepositAmount))} />
               </Section>
             )}
 

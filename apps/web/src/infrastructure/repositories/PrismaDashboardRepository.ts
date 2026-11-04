@@ -30,7 +30,8 @@ import {
  */
 function confirmedWhere(since?: Date | null): Prisma.OrderWhereInput {
   return {
-    status: { notIn: ['PENDING', 'CANCELLED'] },
+    // AWAITING_DEPOSIT: el anticipo aún no entró, no es un ingreso confirmado.
+    status: { notIn: ['PENDING', 'AWAITING_DEPOSIT', 'CANCELLED'] },
     ...(since ? { createdAt: { gte: since } } : {}),
   }
 }
@@ -97,7 +98,7 @@ export class PrismaDashboardRepository {
     const [revenueAgg, paidOrders, pendingCount, createdCount] = await Promise.all([
       prisma.order.aggregate({ where: confirmedWhere(since), _sum: { total: true } }),
       prisma.order.count({ where: confirmedWhere(since) }),
-      prisma.order.count({ where: { status: 'PENDING', ...createdInRange } }),
+      prisma.order.count({ where: { status: { in: ['PENDING', 'AWAITING_DEPOSIT'] }, ...createdInRange } }),
       prisma.order.count({ where: createdInRange }),
     ])
 
@@ -106,7 +107,7 @@ export class PrismaDashboardRepository {
     let previous: PeriodTotals | null = null
     if (prevSince && prevUntil) {
       const prevWhere: Prisma.OrderWhereInput = {
-        status: { notIn: ['PENDING', 'CANCELLED'] },
+        status: { notIn: ['PENDING', 'AWAITING_DEPOSIT', 'CANCELLED'] },
         createdAt: { gte: prevSince, lt: prevUntil },
       }
       const [prevRevenueAgg, prevPaidOrders] = await Promise.all([
@@ -175,8 +176,10 @@ export class PrismaDashboardRepository {
     for (const row of rows) {
       const total = row._count?._all ?? 0
       switch (row.status) {
-        case 'PENDING': counts.pending = total; break
-        case 'PAID': counts.paid = total; break
+        case 'PENDING':
+        case 'AWAITING_DEPOSIT': counts.pending += total; break
+        case 'PAID':
+        case 'COD_CONFIRMED': counts.paid += total; break
         case 'SHIPPED': counts.shipped = total; break
         case 'DELIVERED': counts.delivered = total; break
         case 'CANCELLED': counts.cancelled = total; break
@@ -238,7 +241,7 @@ export class PrismaDashboardRepository {
     inAWeek.setDate(inAWeek.getDate() + 7)
 
     const [paidNotShipped, outOfStock, couponsExpiringSoon] = await Promise.all([
-      prisma.order.count({ where: { status: 'PAID' } }),
+      prisma.order.count({ where: { status: { in: ['PAID', 'COD_CONFIRMED'] } } }),
       prisma.product.count({ where: { stock: 0, isActive: true, deletedAt: null } }),
       prisma.coupon.count({ where: { isActive: true, expiresAt: { gte: now, lte: inAWeek } } }),
     ])
