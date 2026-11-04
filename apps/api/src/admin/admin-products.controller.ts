@@ -1,6 +1,6 @@
 import {
   Body, Controller, Delete, Get, HttpCode, HttpException, Inject, NotFoundException,
-  Param, Patch, Post, Put, UploadedFile, UseInterceptors,
+  Param, Patch, Post, Put, UnprocessableEntityException, UploadedFile, UseInterceptors,
 } from '@nestjs/common'
 import { FileInterceptor } from '@nestjs/platform-express'
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger'
@@ -8,6 +8,7 @@ import {
   IProductRepository,
   IProductDescriptionRepository,
   UpsertProductDescription,
+  validateProductPricing,
 } from '@motek/domain'
 import { PRODUCT_REPOSITORY, PRODUCT_DESCRIPTION_REPOSITORY } from '../infrastructure/injection-tokens'
 import { CloudinaryService } from '../infrastructure/services/CloudinaryService'
@@ -40,11 +41,15 @@ export class AdminProductsController {
   @HttpCode(201)
   @ApiOperation({ summary: 'Crear producto' })
   create(@Body() dto: CreateProductDto) {
+    const pricingError = validateProductPricing(dto.price, dto.compareAtPrice)
+    if (pricingError) throw new UnprocessableEntityException(pricingError)
+
     return this.productRepo.save({
       name: dto.name,
       slug: dto.slug,
       description: dto.description,
       price: dto.price,
+      compareAtPrice: dto.compareAtPrice ?? null,
       stock: dto.stock,
       sku: dto.sku,
       categoryId: dto.categoryId,
@@ -60,7 +65,18 @@ export class AdminProductsController {
 
   @Put(':id')
   @ApiOperation({ summary: 'Actualizar producto' })
-  update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
+  async update(@Param('id') id: string, @Body() dto: UpdateProductDto) {
+    // Actualización parcial: la invariante price/compareAtPrice se valida contra
+    // los valores resultantes (lo enviado + lo que ya está en BD).
+    if (dto.price !== undefined || dto.compareAtPrice !== undefined) {
+      const current = await this.productRepo.findById(id)
+      if (!current) throw new NotFoundException('Producto no encontrado')
+      const pricingError = validateProductPricing(
+        dto.price ?? current.price,
+        dto.compareAtPrice !== undefined ? dto.compareAtPrice : current.compareAtPrice,
+      )
+      if (pricingError) throw new UnprocessableEntityException(pricingError)
+    }
     return this.productRepo.update(id, {
       ...dto,
       compatible: dto.compatible?.map((c) => ({ id: '', brand: c.brand, model: c.model, year: c.year ?? null })),

@@ -223,7 +223,7 @@ export class PrismaOrderRepository implements IOrderRepository {
   }
 
   /**
-   * Crea un pedido COD ya confirmado (PAID + Payment APPROVED + stock descontado),
+   * Crea un pedido COD ya confirmado (COD_CONFIRMED + Payment APPROVED + stock descontado),
    * sin esperar ningún webhook de pasarela — ver IOrderRepository.createPaidOrder.
    */
   async createPaidOrder(input: CreateOrderInput): Promise<Order> {
@@ -232,7 +232,7 @@ export class PrismaOrderRepository implements IOrderRepository {
         data: {
           ...ownerData(input.customer),
           trackingToken: generateTrackingToken(),
-          status: 'PAID',
+          status: 'COD_CONFIRMED',
           total: input.total,
           shippingAddress: input.shippingAddress as unknown as Prisma.InputJsonValue,
           deliveryMethod: input.deliveryMethod,
@@ -470,7 +470,7 @@ export class PrismaOrderRepository implements IOrderRepository {
 
   async hasApprovedOrders(userId: string): Promise<boolean> {
     const row = await prisma.order.findFirst({
-      where: { userId, status: { in: ['PAID', 'SHIPPED', 'DELIVERED'] } },
+      where: { userId, status: { in: ['PAID', 'COD_CONFIRMED', 'SHIPPED', 'DELIVERED'] } },
       select: { id: true },
     })
     return row !== null

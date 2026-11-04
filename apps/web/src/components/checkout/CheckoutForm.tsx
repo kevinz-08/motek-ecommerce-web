@@ -23,6 +23,7 @@ import { TurnstileWidget } from './TurnstileWidget'
 import { CitySelector } from './CitySelector'
 import { apiClient, type ApiResponse } from '@/lib/api-client'
 import { useShippingQuote } from '@/lib/shipping-quote'
+import { cartSavings } from '@/lib/pricing'
 import { STORE_ADDRESS, STORE_CITY, STORE_MAP_EMBED_URL } from '@/lib/contact'
 
 type PaymentMethod = 'WOMPI' | 'COD'
@@ -54,6 +55,11 @@ interface CheckoutFormProps {
   turnstileSiteKey: string
   /** Si el admin desactivó COD en /admin/configuracion, la opción no se muestra. */
   codEnabled: boolean
+  /**
+   * Anticipo pre-envío de contraentrega en centavos COP (Settings.COD_DEPOSIT_AMOUNT). 0 = sin anticipo.
+   * Solo aplica a envío a domicilio: el retiro en tienda está exento. El backend decide el valor real.
+   */
+  codDepositCents: number
   /**
    * Política global (no elegible por el cliente): si el admin la desactivó en
    * /admin/configuracion, todos los pedidos pagados en línea (WOMPI) nacen con
@@ -92,6 +98,7 @@ export function CheckoutForm({
   guestCheckoutEnabled,
   turnstileSiteKey,
   codEnabled,
+  codDepositCents,
   shippingOnlineEnabled,
 }: CheckoutFormProps) {
   const { data: session } = useSession()
@@ -150,6 +157,10 @@ export function CheckoutForm({
   })
 
   const cartTotal = total()
+  const savings = cartSavings(items)
+  const codDeposit = paymentMethod === 'COD' && deliveryMethod === 'HOME_DELIVERY'
+    ? Math.min(codDepositCents, cartTotal)
+    : 0
   const shippingItems = items.map((i) => ({ productId: i.product.id, quantity: i.quantity }))
   const quotePaymentMethod = paymentMethod === 'COD' ? 'COD' : 'EXTERNAL_PAYMENT'
   // Retiro en tienda: no hay nada que cotizar — se pasa `null` para que el hook
@@ -308,8 +319,9 @@ export function CheckoutForm({
 
       if (trackingToken) setGuestTrackingToken(trackingToken)
 
-      if (paymentMethod === 'COD') {
+      if (paymentMethod === 'COD' && !payment?.publicKey) {
         // El pedido COD ya nació confirmado — no hay widget de pago que mostrar.
+        // (Con anticipo, `payment` trae los datos de Wompi y se sigue al paso de pago.)
         // Solo llega acá un usuario autenticado: COD no se ofrece a invitados.
         router.push(`/checkout/confirmacion?orderId=${order.id}`)
         return
@@ -689,6 +701,18 @@ export function CheckoutForm({
                   </label>
                 </div>
 
+                {codDeposit > 0 && (
+                  <div className="mt-3 border border-dashed border-[var(--c-accent)] bg-[var(--c-active-bg)] rounded-lg px-4 py-3">
+                    <span className="block text-sm font-semibold text-gray-900">
+                      Anticipo de {formatCOP(codDeposit)} para confirmar tu envío
+                    </span>
+                    <span className="block text-xs text-gray-500 mt-1">
+                      Lo pagas ahora con Wompi y se descuenta de tu pedido: al recibirlo pagas en efectivo
+                      solo el saldo de {formatCOP(Math.max(0, cartTotal - codDeposit))}.
+                    </span>
+                  </div>
+                )}
+
                 {/* Nota informativa — no es una elección del cliente, es una política global
                     del negocio (toggle "Flete pagado en línea" en /admin/configuracion). */}
                 {chargingShippingOnline && (
@@ -851,14 +875,19 @@ export function CheckoutForm({
               aria-disabled={!acceptedPolicies || (isGuest && !captchaToken)}
               className="w-full bg-[var(--c-accent)] text-white py-3 rounded-xl font-bold text-base hover:bg-[var(--c-accent-hover)] active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {loading ? 'Procesando...' : paymentMethod === 'COD' ? 'Confirmar pedido →' : 'Continuar al pago →'}
+              {loading ? 'Procesando...' : paymentMethod === 'COD' ? (codDeposit > 0 ? 'Pagar anticipo →' : 'Confirmar pedido →') : 'Continuar al pago →'}
             </button>
           </form>
         ) : (
           <div className="bg-white border border-gray-200 rounded-xl p-6">
-            <h2 className="font-bold text-gray-900 mb-2">Pago seguro con Wompi</h2>
+            <h2 className="font-bold text-gray-900 mb-2">
+              {paymentMethod === 'COD' ? 'Paga tu anticipo con Wompi' : 'Pago seguro con Wompi'}
+            </h2>
             <p className="text-sm text-gray-500 mb-6">
-              Completa tu pago. Aceptamos Tarjeta, Nequi, PSE y Bancolombia.
+              {paymentMethod === 'COD'
+                ? 'Tu pedido se despacha cuando recibimos el anticipo; el saldo lo pagas en efectivo al recibir.'
+                : 'Completa tu pago.'}{' '}
+              Aceptamos Tarjeta, Nequi, PSE y Bancolombia.
             </p>
             {wompiParams && wompiParams.publicKey && wompiParams.integritySignature && (
               <WompiWidget
@@ -895,6 +924,12 @@ export function CheckoutForm({
             ))}
           </div>
           <div className="border-t border-gray-100 pt-4 space-y-2">
+            {savings > 0 && (
+              <div className="flex justify-between text-sm text-green-700">
+                <span className="font-medium">Estás ahorrando</span>
+                <span className="font-semibold">{formatCOP(savings)}</span>
+              </div>
+            )}
             {appliedCoupon && (
               <div className="flex justify-between text-sm text-green-700">
                 <span className="font-medium">Descuento ({appliedCoupon.code})</span>

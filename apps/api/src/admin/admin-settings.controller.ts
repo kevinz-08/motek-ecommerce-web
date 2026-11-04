@@ -1,8 +1,9 @@
-import { Body, Controller, Patch } from '@nestjs/common'
+import { Body, Controller, Patch, Put } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { PrismaService } from '../infrastructure/database/prisma.service'
 import { Roles } from '../auth/decorators/roles.decorator'
 import { ToggleSettingDto } from './dto/toggle-setting.dto'
+import { UpdateCodDepositDto } from './dto/update-cod-deposit.dto'
 
 @ApiTags('admin / settings')
 @ApiBearerAuth('access-token')
@@ -31,6 +32,21 @@ export class AdminSettingsController {
       create: { key: 'COD_ENABLED', value: dto.enabled ? 'true' : 'false' },
     })
     return { success: true, enabled: dto.enabled }
+  }
+
+  @Put('cod-deposit')
+  @ApiOperation({
+    summary: 'Definir el anticipo pre-envío de contraentrega (centavos COP). 0 = desactivado (default). '
+      + 'El retiro en tienda siempre está exento.',
+  })
+  async updateCodDeposit(@Body() dto: UpdateCodDepositDto) {
+    const value = String(dto.amountCents)
+    await this.prisma.client.settings.upsert({
+      where: { key: 'COD_DEPOSIT_AMOUNT' },
+      update: { value },
+      create: { key: 'COD_DEPOSIT_AMOUNT', value },
+    })
+    return { success: true, amountCents: dto.amountCents }
   }
 
   @Patch('guest-checkout')

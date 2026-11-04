@@ -138,7 +138,30 @@ describe('CreateOrder', () => {
 
     expect(create).toHaveBeenCalledWith(expect.objectContaining({
       total: product.price * 3,
-      items: [{ productId: 'prod-1', quantity: 3, priceAtPurchase: product.price }],
+      items: [{ productId: 'prod-1', quantity: 3, priceAtPurchase: product.price, compareAtPriceAtPurchase: null }],
+    }))
+  })
+
+  it('guarda el precio ancla vigente en el ítem solo si es mayor al precio', async () => {
+    const anchored = makeProduct({ price: 3000000, compareAtPrice: 4000000 })
+    const order = makeOrder({ total: anchored.price })
+    const productRepo = { findById: vi.fn().mockResolvedValue(anchored) } as unknown as IProductRepository
+    const create = vi.fn().mockResolvedValue(order)
+    const orderRepo = { create } as unknown as IOrderRepository
+    const paymentService = {
+      createTransaction: vi.fn().mockResolvedValue({ externalId: null, reference: 'ref', integritySignature: 'sig', publicKey: 'pk', amountInCents: order.total, currency: 'COP' }),
+    } as unknown as IPaymentService
+
+    await new CreateOrder(orderRepo, productRepo, paymentService).execute({
+      customer: { kind: 'user', userId: 'user-1', email: 'cliente@motek.test' },
+      items: [{ productId: 'prod-1', quantity: 1 }],
+      shippingAddress: SHIPPING,
+      buyer: { idType: 'CC', idNumber: '1000123456' },
+      paymentProvider: 'WOMPI',
+    })
+
+    expect(create).toHaveBeenCalledWith(expect.objectContaining({
+      items: [expect.objectContaining({ priceAtPurchase: 3000000, compareAtPriceAtPurchase: 4000000 })],
     }))
   })
 
@@ -205,7 +228,7 @@ describe('CreateOrder', () => {
 
   it('COD: crea el pedido vía createPaidOrder y no llama a paymentService', async () => {
     const product = makeProduct()
-    const order = makeOrder({ total: product.price * 2, paymentProvider: 'COD', status: 'PAID' })
+    const order = makeOrder({ total: product.price * 2, paymentProvider: 'COD', status: 'COD_CONFIRMED' })
 
     const productRepo = {
       findById: vi.fn().mockResolvedValue(product),
@@ -228,7 +251,7 @@ describe('CreateOrder', () => {
 
     expect(result.ok).toBe(true)
     if (result.ok) {
-      expect(result.value.order.status).toBe('PAID')
+      expect(result.value.order.status).toBe('COD_CONFIRMED')
       expect(result.value.payment).toBeNull()
     }
     expect(createPaidOrder).toHaveBeenCalledWith(expect.objectContaining({
@@ -439,7 +462,7 @@ describe('CreateOrder', () => {
 
   it('paymentProvider COD con chargeShippingOnline:true igual deja shippingTotal en 0 (guard explícito)', async () => {
     const product = makeProduct()
-    const order = makeOrder({ total: product.price, paymentProvider: 'COD', status: 'PAID' })
+    const order = makeOrder({ total: product.price, paymentProvider: 'COD', status: 'COD_CONFIRMED' })
     const productRepo = { findById: vi.fn().mockResolvedValue(product) } as unknown as IProductRepository
     const createPaidOrder = vi.fn().mockResolvedValue(order)
     const orderRepo = { createPaidOrder } as unknown as IOrderRepository
@@ -832,6 +855,94 @@ describe('CreateOrder', () => {
 
       expect(result.ok).toBe(true)
       expect(cityCoverage.findByCityCode).not.toHaveBeenCalled()
+    })
+  })
+
+  // ── COD con anticipo pre-envío ──────────────────────────────────────────────
+  describe('COD con anticipo', () => {
+    function setup(depositOrder?: Partial<Order>) {
+      const product = makeProduct()
+      const order = makeOrder({
+        total: product.price, paymentProvider: 'COD', status: 'AWAITING_DEPOSIT', ...depositOrder,
+      })
+      const productRepo = { findById: vi.fn().mockResolvedValue(product) } as unknown as IProductRepository
+      const create = vi.fn().mockResolvedValue(order)
+      const createPaidOrder = vi.fn().mockResolvedValue(makeOrder({ paymentProvider: 'COD', status: 'COD_CONFIRMED' }))
+      const orderRepo = { create, createPaidOrder } as unknown as IOrderRepository
+      const createTransaction = vi.fn().mockResolvedValue({
+        externalId: null, reference: 'ORDER-order-1-1', integritySignature: 'sig', publicKey: 'pk',
+        amountInCents: 1500000, currency: 'COP',
+      })
+      const paymentService = { createTransaction } as unknown as IPaymentService
+      const base = {
+        customer: { kind: 'user' as const, userId: 'user-1', email: 'cliente@motek.test' },
+        items: [{ productId: 'prod-1', quantity: 1 }],
+        shippingAddress: SHIPPING,
+        buyer: { idType: 'CC' as const, idNumber: '1000123456' },
+        paymentProvider: 'COD' as const,
+      }
+      return { product, productRepo, create, createPaidOrder, createTransaction, orderRepo, paymentService, base }
+    }
+
+    it('con anticipo crea el pedido vía create() con codDepositAmount y abre la transacción Wompi', async () => {
+      const t = setup()
+      const result = await new CreateOrder(t.orderRepo, t.productRepo, t.paymentService)
+        .execute({ ...t.base, codDepositCents: 1500000 })
+
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.value.order.status).toBe('AWAITING_DEPOSIT')
+        expect(result.value.payment?.publicKey).toBe('pk')
+      }
+      expect(t.create).toHaveBeenCalledWith(expect.objectContaining({ paymentProvider: 'COD', codDepositAmount: 1500000 }))
+      expect(t.createPaidOrder).not.toHaveBeenCalled()
+      expect(t.createTransaction).toHaveBeenCalledTimes(1)
+    })
+
+    it('el anticipo se limita al total del pedido', async () => {
+      const t = setup()
+      await new CreateOrder(t.orderRepo, t.productRepo, t.paymentService)
+        .execute({ ...t.base, codDepositCents: t.product.price * 10 })
+
+      expect(t.create).toHaveBeenCalledWith(expect.objectContaining({ codDepositAmount: t.product.price }))
+    })
+
+    it('retiro en tienda queda exento: nace COD_CONFIRMED sin anticipo', async () => {
+      const t = setup()
+      const result = await new CreateOrder(t.orderRepo, t.productRepo, t.paymentService)
+        .execute({ ...t.base, deliveryMethod: 'STORE_PICKUP', codDepositCents: 1500000 })
+
+      expect(result.ok).toBe(true)
+      expect(t.createPaidOrder).toHaveBeenCalledTimes(1)
+      expect(t.create).not.toHaveBeenCalled()
+      expect(t.createTransaction).not.toHaveBeenCalled()
+    })
+
+    it('anticipo 0 o ausente mantiene el flujo COD sin anticipo', async () => {
+      const t = setup()
+      await new CreateOrder(t.orderRepo, t.productRepo, t.paymentService)
+        .execute({ ...t.base, codDepositCents: 0 })
+
+      expect(t.createPaidOrder).toHaveBeenCalledTimes(1)
+      expect(t.create).not.toHaveBeenCalled()
+    })
+
+    it('un pedido online ignora codDepositCents', async () => {
+      const t = setup({ paymentProvider: 'WOMPI', status: 'PENDING' })
+      await new CreateOrder(t.orderRepo, t.productRepo, t.paymentService)
+        .execute({ ...t.base, paymentProvider: 'WOMPI', codDepositCents: 1500000 })
+
+      expect(t.create).toHaveBeenCalledWith(expect.not.objectContaining({ codDepositAmount: expect.anything() }))
+    })
+
+    it('PAYMENT_ERROR si Wompi falla al iniciar la transacción del anticipo', async () => {
+      const t = setup()
+      t.createTransaction.mockRejectedValue(new Error('boom'))
+      const result = await new CreateOrder(t.orderRepo, t.productRepo, t.paymentService)
+        .execute({ ...t.base, codDepositCents: 1500000 })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('PAYMENT_ERROR')
     })
   })
 })

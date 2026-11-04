@@ -57,8 +57,11 @@ export class WompiReconciliationService implements OnModuleInit, OnModuleDestroy
 
     const staleOrders = await this.prisma.client.order.findMany({
       where: {
-        status: 'PENDING',
-        paymentProvider: 'WOMPI',
+        // COD con anticipo: su único Payment es Wompi, pero el pedido sigue COD hasta que el anticipo se apruebe.
+        OR: [
+          { status: 'PENDING', paymentProvider: 'WOMPI' },
+          { status: 'AWAITING_DEPOSIT', paymentProvider: 'COD' },
+        ],
         createdAt: { lt: cutoff },
         payment: { externalId: { not: null } },
       },

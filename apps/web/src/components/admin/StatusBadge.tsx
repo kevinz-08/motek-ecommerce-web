@@ -3,6 +3,8 @@ import { Badge, type BadgeVariant } from '@/components/ui/Badge'
 const ORDER_STATUS_MAP: Record<string, { label: string; variant: BadgeVariant }> = {
   PENDING: { label: 'Pendiente', variant: 'warning' },
   PAID: { label: 'Pagado', variant: 'success' },
+  AWAITING_DEPOSIT: { label: 'Esperando anticipo', variant: 'warning' },
+  COD_CONFIRMED: { label: 'COD confirmado', variant: 'success' },
   SHIPPED: { label: 'Enviado', variant: 'info' },
   DELIVERED: { label: 'Entregado', variant: 'success' },
   CANCELLED: { label: 'Cancelado', variant: 'danger' },

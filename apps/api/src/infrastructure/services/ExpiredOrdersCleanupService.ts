@@ -4,6 +4,8 @@ import { intervalJobsEnabled } from '../../jobs/background-jobs.config'
 
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000 // cada hora
 const EXPIRY_HOURS = 2
+// Contraentrega con anticipo: el cliente puede pagarlo después, así que el plazo es mayor.
+const DEPOSIT_EXPIRY_HOURS = 24
 
 @Injectable()
 export class ExpiredOrdersCleanupService implements OnModuleInit, OnModuleDestroy {
@@ -29,17 +31,21 @@ export class ExpiredOrdersCleanupService implements OnModuleInit, OnModuleDestro
   async cancelExpiredOrders(): Promise<void> {
     const expiryDate = new Date(Date.now() - EXPIRY_HOURS * 60 * 60 * 1000)
 
+    const depositExpiryDate = new Date(Date.now() - DEPOSIT_EXPIRY_HOURS * 60 * 60 * 1000)
+
     const result = await this.prisma.client.order.updateMany({
       where: {
-        status: 'PENDING',
-        createdAt: { lt: expiryDate },
+        OR: [
+          { status: 'PENDING', createdAt: { lt: expiryDate } },
+          { status: 'AWAITING_DEPOSIT', createdAt: { lt: depositExpiryDate } },
+        ],
       },
       data: { status: 'CANCELLED' },
     })
 
     if (result.count > 0) {
       this.logger.warn(
-        `[ExpiredOrdersCleanup] ${result.count} orden(es) PENDING expiradas marcadas CANCELLED (umbral: ${EXPIRY_HOURS}h)`,
+        `[ExpiredOrdersCleanup] ${result.count} orden(es) PENDING/AWAITING_DEPOSIT expiradas marcadas CANCELLED (umbral: ${EXPIRY_HOURS}h / ${DEPOSIT_EXPIRY_HOURS}h)`,
       )
     }
   }

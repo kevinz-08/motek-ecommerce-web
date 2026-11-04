@@ -3,11 +3,16 @@
 import { useState } from 'react'
 import { OrderStatus } from '@motek/domain'
 
-const statusOptions: OrderStatus[] = ['PENDING', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED']
+// Los estados de contraentrega y los de pago en línea no se mezclan: cada pedido
+// ofrece solo los de su método de pago (la API también lo rechaza).
+const ONLINE_STATUS_OPTIONS: OrderStatus[] = ['PENDING', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED']
+const COD_STATUS_OPTIONS: OrderStatus[] = ['AWAITING_DEPOSIT', 'COD_CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED']
 
 const statusLabels: Record<OrderStatus, string> = {
   PENDING:   'Pendiente',
   PAID:      'Pagado',
+  AWAITING_DEPOSIT: 'Esperando anticipo',
+  COD_CONFIRMED:    'COD confirmado',
   SHIPPED:   'Enviado',
   DELIVERED: 'Entregado',
   CANCELLED: 'Cancelado',
@@ -16,9 +21,11 @@ const statusLabels: Record<OrderStatus, string> = {
 interface OrderStatusSelectProps {
   orderId: string
   currentStatus: OrderStatus
+  paymentProvider: string
 }
 
-export function OrderStatusSelect({ orderId, currentStatus }: OrderStatusSelectProps) {
+export function OrderStatusSelect({ orderId, currentStatus, paymentProvider }: OrderStatusSelectProps) {
+  const statusOptions = paymentProvider === 'COD' ? COD_STATUS_OPTIONS : ONLINE_STATUS_OPTIONS
   const [status, setStatus] = useState<OrderStatus>(currentStatus)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)

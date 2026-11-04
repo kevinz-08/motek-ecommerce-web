@@ -945,3 +945,66 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Infraestructura: `NEXT_PUBLIC_TURNSTILE_SITE_KEY` real en `motek-deploy\web.env.production` y en Vercel (Production) y redespliegue de producción.
 
 **Verificación:** type-check de `apps/web/src` y ESLint de los archivos tocados sin errores. `next build` genera `/robots.txt`, `/manifest.webmanifest`, `/apple-icon.png` y `/sitemap.xml`; con `next start` local: robots con las reglas esperadas, manifiesto e ícono 200, `<link rel="apple-touch-icon">` y `<link rel="manifest">` en el HTML, canónicas correctas en catálogo/categoría/búsqueda/contacto/legales, título de contacto sin duplicar y sitemap sin `/auth`. La Site Key aparece en el JavaScript servido por `/pedidos/seguimiento/solicitar` en producción. Pendiente: canónica de producto y captcha visibles en producción tras publicar.
+
+---
+
+## 2026-10-29 — Build de producción en Vercel fallido por caché (PR #8)
+
+**Problema/Motivo:** Tras fusionar el PR #8 (`release/v1-alpha` → `main`, commit `1f58fd7`), el build de producción de Vercel falló con 27 errores de Turbopack en `next/font/google` ("Can't resolve '@vercel/turbopack-next/internal/font/google/font'" / "next/font/google queries have exactly one entry") sobre `apps/web/src/app/layout.tsx`. El mismo código construyó bien como Preview de `release/v1-alpha` minutos antes y en local con `next build`; la única diferencia fue que el build de producción restauró la caché de un despliegue anterior. Mientras tanto, Vercel siguió sirviendo el último despliegue bueno (sin caída).
+
+**Cambios:**
+
+- Infraestructura: variable temporal `VERCEL_FORCE_NO_BUILD_CACHE=1` (Production), `vercel redeploy` del despliegue fallido con target production, y eliminación de la variable al terminar. Sin cambios de código.
+
+**Verificación:** el despliegue sin caché quedó `Ready` con alias `www.tiendamotek.com`. En producción: `robots.txt` con las reglas nuevas, `/manifest.webmanifest` y `/apple-icon.png` responden 200, título de `/contacto` sin duplicar, canónicas correctas en portada, catálogo, producto y contacto, y sitemap sin `/auth`. Si el error reaparece en un build futuro, repetir el redeploy sin caché.
+
+---
+
+## 2026-11-03 — Apartado "Guía Vendelo" en el admin de pedidos (reintento de despacho y guía PDF)
+
+**Problema/Motivo:** Un pedido COD de prueba (domingo 2026-11-01) no generó guía. El webhook de Wompi no interviene en COD (el pedido se encola en `VendeloOrderQueue` al crearse). El hueco real: crear el pedido en Vendelo no produce la guía — hacen falta `create-shipments` y `generate-labels`, que existían solo como endpoints de la API sin UI, y un despacho fallido (`FAILED`) solo dejaba una alerta en stderr. Portado desde `electro-motos-tdk` (entrada #148).
+
+**Cambios:**
+
+- `apps/api/src/infrastructure/services/VendeloOrderQueueService.ts` — `MAX_ATTEMPTS` exportado, `findByOrderId()` y `requeue()` (resetea la fila existente en vez de crear otra para no duplicar el pedido en Vendelo; rechaza pedidos ya en Vendelo, retiro en tienda, anulados o en vuelo; espera a que termine el procesamiento por el CPU limitado de Cloud Run).
+- `apps/api/src/vendelo/services/shipping-admin.service.ts` — `getShippingStatus()` (cola + `vendeloOrderId` + `Shipment` + flags `actions` calculados en el servidor).
+- `apps/api/src/vendelo/vendelo.controller.ts` — `GET admin/vendelo/orders/:orderId/shipping-status` y `POST admin/vendelo/orders/:orderId/requeue` (`@Roles('ADMIN')`).
+- `apps/web/src/lib/admin-vendelo-proxy.ts` y `apps/web/src/app/api/admin/vendelo/orders/[id]/{route,requeue,shipment,guia}` — BFF delgado hacia NestJS (la guía se sirve como PDF).
+- `apps/web/src/components/admin/VendeloGuiaSection.tsx` (nuevo) y `OrderInfoModal.tsx` — sección con estado del despacho, "Reintentar envío a Vendelo", "Generar guía", "Ver/Descargar guía PDF".
+- `apps/api/src/__tests__/VendeloOrderQueueService.test.ts` — 7 tests de `requeue()`.
+
+**Verificación:** `tsc --noEmit` limpio en `apps/api` y `apps/web`; tests de `VendeloOrderQueueService` 17/17. Pendiente: diagnóstico del pedido del domingo en producción (requiere acceso a `motek-app-web`/BD).
+
+---
+
+## 2026-11-03 — Precio tachado (precio ancla `compareAtPrice`) con historial de precios
+
+**Problema/Motivo:** La tienda no podía mostrar un precio "antes" tachado para comunicar un descuento. Portado desde `electro-motos-tdk` (entrada #150, Fase 1). Para cumplir la Ley 1480 / SIC, el precio de referencia debe haber sido un precio realmente cobrado, por eso se guarda un historial.
+
+**Cambios:**
+
+- `packages/database/prisma/schema.prisma` y migración `20261103120000_product_compare_at_price` — `Product.compareAtPrice` con `CHECK (compareAtPrice > price)`, tabla `ProductPriceHistory` (con backfill del precio vigente) y `OrderItem.compareAtPriceAtPurchase`. **La migración está sin aplicar a producción.**
+- `packages/domain` — `validateProductPricing`, `getDiscountPercent`, `hasCompareAtPrice` (`Product.ts`); `OrderItem`/`CreateOrderInput`; `CreateOrder` guarda el ancla vigente por ítem. Tests: `ProductPricing.test.ts` (nuevo) y caso en `CreateOrder.test.ts`.
+- `apps/api` — DTOs de producto con `compareAtPrice` (nullable), validación de la invariante en crear y en edición parcial (contra BD), historial `ADMIN_CREATE`/`ADMIN_UPDATE` en `PrismaProductRepository`, `compareAtPriceAtPurchase` en `PrismaOrderRepository`, y `PrismaStockSyncRepository.bulkUpdateStockAndPrice` limpia el ancla cuando el sync del ERP alcanza o supera ese precio (el CHECK habría roto toda la transacción) y registra `ERP_SYNC`.
+- `apps/web` — `PriceTag` (tachado + precio + badge `-X%` con el acento de marca) en tarjeta, PDP y carrito; `lib/pricing.ts` (`cartSavings`) con fila "Estás ahorrando" en carrito y checkout; campo "Precio anterior" en `ProductEditForm`; repositorio web y página admin pasan `compareAtPrice`.
+
+**Verificación:** `tsc --noEmit` limpio en api y web; tests de dominio 180/180 y de API 310/310; ESLint sin errores en los archivos tocados.
+
+---
+
+## 2026-11-03 — Contraentrega con estados propios y anticipo pre-envío por Wompi
+
+**Problema/Motivo:** Los pedidos contraentrega (COD) nacían `PAID` aunque el dinero no hubiera llegado, y no había forma de pedir un anticipo para reducir devoluciones. Portado desde `electro-motos-tdk` (entradas #196 y #197). Decisiones tomadas por defecto al ejecutar el plan (sin respuesta explícita del negocio): el anticipo queda **apagado (monto 0)** hasta que el admin lo configure; el retiro en tienda está exento; sin pago en 24 h el pedido se cancela sin cobro.
+
+**Cambios:**
+
+- `packages/database` — enum `OrderStatus` con `AWAITING_DEPOSIT` y `COD_CONFIRMED`; `Order.codDepositAmount`. Tres migraciones (`20261103130000`, `…130100`, `…130200`): agregar valores del enum, pasar los COD existentes de `PAID` a `COD_CONFIRMED` (Postgres no deja usar un valor recién creado en la misma transacción) y la columna. **Sin aplicar a producción; ver "Despliegue".**
+- `packages/domain` — `OrderStatus`, `codBalanceDue`, `Order.codDepositAmount`; `CreateOrder` (`codDepositCents`: COD a domicilio nace `AWAITING_DEPOSIT` y abre la transacción Wompi por el anticipo; COD sin anticipo nace `COD_CONFIRMED`); `ConfirmPayment` valida contra el anticipo, confirma `AWAITING_DEPOSIT → COD_CONFIRMED` con stock, y un anticipo rechazado no cancela el pedido; `transitionFromPending({ from })`; `CancelOrder` repone stock también de `COD_CONFIRMED`.
+- `apps/api` — `PrismaOrderRepository` (estado inicial, `Payment` WOMPI por el anticipo, `from`, ingresos sin `AWAITING_DEPOSIT`, `hasApprovedOrders`), `PUT /admin/settings/cod-deposit` (`COD_DEPOSIT_AMOUNT`), `POST /orders/:id/deposit-transaction` (reintento, solo el dueño), `PATCH /orders/:id/status` rechaza mezclar estados COD/online, `WompiService` cobra el anticipo, `ExpiredOrdersCleanupService` (24 h para `AWAITING_DEPOSIT`), `WompiReconciliationService` (anticipos con webhook perdido), correo con anticipo y saldo, `VendeloService.prorateDepositIntoUnitPrices` (el repartidor cobra solo el saldo; si el anticipo cubre todo se envía como `EXTERNAL_PAYMENT`).
+- `apps/web` — checkout (desglose del anticipo y botón "Pagar anticipo"), confirmación con `PayDepositSection` y poller, `CodDepositForm` en Configuración, bloque del anticipo en el detalle del pedido, badges/selector/filtros de estados COD en el admin (el selector ofrece solo los estados del método de pago), dashboard sin ingresos de `AWAITING_DEPOSIT`, ayuda de Pedidos actualizada (incluye la sección Guía Vendelo).
+- `CLAUDE.md` — patrón de estados COD y anticipo.
+- Tests: `codBalanceDue`, `ConfirmPayment` y `CreateOrder` (anticipo), `orders.controller` (anticipo, reintento, mezcla de estados), `VendeloService` (prorrateo).
+
+**Verificación:** `tsc --noEmit` limpio en api y web; tests de dominio 193/193 y de API 324/324; ESLint sin errores.
+
+**Despliegue / pendiente:** (1) Desplegar API y web **antes** de aplicar las migraciones, o aplicar las dos primeras justo con el deploy: el código nuevo entiende `COD_CONFIRMED`, el viejo no. (2) Aplicar `prisma migrate deploy` (incluye la migración del precio ancla). (3) Validar con un pedido real en Venndelo los decimales del `unit_price` prorrateado y el valor a recaudar antes de activar el anticipo. (4) Pendientes heredados de TDK: correo recordatorio del anticipo, política legal de devolución/retención del anticipo (revisión legal, Ley 1480) y E2E con el sandbox de Wompi.

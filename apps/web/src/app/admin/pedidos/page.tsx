@@ -12,6 +12,8 @@ interface PageProps {
 const STATUS_LABELS: Record<string, string> = {
   PENDING: 'Pendiente',
   PAID: 'Pagado',
+  AWAITING_DEPOSIT: 'Esperando anticipo',
+  COD_CONFIRMED: 'COD confirmado',
   SHIPPED: 'Enviado',
   DELIVERED: 'Entregado',
   CANCELLED: 'Cancelado',
@@ -39,7 +41,7 @@ export default async function AdminPedidosPage({ searchParams }: PageProps) {
 
       {/* Filtros de estado */}
       <div className="flex gap-2 mb-6 flex-wrap" role="group" aria-label="Filtrar pedidos por estado">
-        {[undefined, 'PENDING', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED'].map((s) => (
+        {[undefined, 'PENDING', 'PAID', 'AWAITING_DEPOSIT', 'COD_CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED'].map((s) => (
           <a
             key={s ?? 'all'}
             href={s ? `/admin/pedidos?status=${s}` : '/admin/pedidos'}

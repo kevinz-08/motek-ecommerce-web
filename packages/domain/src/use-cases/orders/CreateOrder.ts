@@ -43,6 +43,12 @@ export interface CreateOrderUseCaseInput {
   maxShippingChargeCents?: number
   /** Código del cupón a aplicar. Si no se valida correctamente, la orden no se crea. */
   couponCode?: string
+  /**
+   * Anticipo pre-envío (centavos COP) que el caller resolvió desde Settings. Solo aplica a COD con
+   * entrega a domicilio (el retiro en tienda está exento). Se limita al total del pedido.
+   * 0/undefined = sin anticipo (el pedido COD nace COD_CONFIRMED).
+   */
+  codDepositCents?: number
 }
 
 export interface CreateOrderOutput {
@@ -85,7 +91,7 @@ export interface CreateOrderOutput {
  *
  * Flujo para COD (pago contra entrega):
  *   No hay pasarela ni webhook que confirme el pago — el pedido se confirma al
- *   crearse. Se inserta directamente con estado PAID y el stock se descuenta en
+ *   crearse. Se inserta directamente con estado COD_CONFIRMED y el stock se descuenta en
  *   la misma transacción (`createPaidOrder`), evitando que el pedido quede
  *   colgado en PENDING (sujeto al cleanup de pedidos abandonados). `payment` en
  *   el output es `null`: no hay datos de transacción de pasarela que devolver.
@@ -110,7 +116,7 @@ export class CreateOrder {
 
   async execute(input: CreateOrderUseCaseInput): Promise<Result<CreateOrderOutput>> {
     // 0. COD exige cuenta. Un pedido contra entrega no pasa por ninguna
-    //    autorización de pago: `createPaidOrder` lo deja PAID, descuenta stock y
+    //    autorización de pago: `createPaidOrder` lo deja COD_CONFIRMED, descuenta stock y
     //    lo encola a Vendelo, con un mensajero saliendo a una dirección que nadie
     //    verificó. Sin cuenta no hay identidad ni historial contra el cual medir
     //    el riesgo, así que el fraude sale gratis y a costa del negocio.
@@ -145,6 +151,7 @@ export class CreateOrder {
       productId: string
       quantity: number
       priceAtPurchase: number
+      compareAtPriceAtPurchase: number | null
       /** Solo para validación de cupón — se elimina antes de persistir. */
       _categoryId: string
       _parentCategoryId: string | null
@@ -178,6 +185,9 @@ export class CreateOrder {
         productId: found.id,
         quantity: item.quantity,
         priceAtPurchase: found.price,
+        compareAtPriceAtPurchase: found.compareAtPrice != null && found.compareAtPrice > found.price
+          ? found.compareAtPrice
+          : null,
         // Guardamos categoryId y parentCategoryId para la validación de cupón.
         // No forman parte de CreateOrderInput — son solo datos de trabajo locales.
         _categoryId: found.categoryId,
@@ -261,8 +271,33 @@ export class CreateOrder {
       discountAmount,
     }
 
-    // COD: no hay pasarela que esperar — el pedido se crea ya PAID y con el
-    // stock descontado en la misma transacción.
+    // COD con anticipo: el pedido queda AWAITING_DEPOSIT y se cobra el anticipo por Wompi.
+    // El stock se descuenta cuando el webhook aprueba el anticipo (ConfirmPayment).
+    const codDepositAmount = input.paymentProvider === 'COD'
+      && (input.deliveryMethod ?? 'HOME_DELIVERY') === 'HOME_DELIVERY'
+      && (input.codDepositCents ?? 0) > 0
+      ? Math.min(input.codDepositCents as number, total)
+      : 0
+
+    if (codDepositAmount > 0) {
+      let order: Order
+      try {
+        order = await this.orderRepo.create({ ...createInput, codDepositAmount })
+      } catch (e) {
+        return err(new AppError('INTERNAL_ERROR', 'Error al crear el pedido', e))
+      }
+      let paymentResult: PaymentResult
+      try {
+        // WompiService lee order.codDepositAmount: el cobro es el anticipo, no el total.
+        paymentResult = await this.paymentService.createTransaction(order)
+      } catch (e) {
+        return err(new AppError('PAYMENT_ERROR', 'Error al iniciar el pago del anticipo', e))
+      }
+      return ok({ order, payment: paymentResult, shippingQuoteFallback: false })
+    }
+
+    // COD sin anticipo: no hay pasarela que esperar — el pedido se crea ya
+    // COD_CONFIRMED y con el stock descontado en la misma transacción.
     if (input.paymentProvider === 'COD') {
       let order: Order
       try {

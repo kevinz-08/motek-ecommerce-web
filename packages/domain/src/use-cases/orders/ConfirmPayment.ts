@@ -55,19 +55,23 @@ export class ConfirmPayment {
       return err(new AppError('NOT_FOUND', `Pedido "${input.orderId}" no encontrado`))
     }
 
+    // COD con anticipo: la pasarela cobra solo el anticipo, no el total del pedido.
+    const isCodDeposit = order.paymentProvider === 'COD' && (order.codDepositAmount ?? 0) > 0
+    const expectedAmount = isCodDeposit ? (order.codDepositAmount as number) : order.total
+
     if (
       input.amountInCents !== undefined &&
-      input.amountInCents !== order.total
+      input.amountInCents !== expectedAmount
     ) {
       console.error(
         `[ConfirmPayment] Mismatch de monto en pedido ${order.id}: ` +
-          `esperado=${order.total} recibido=${input.amountInCents}`,
+          `esperado=${expectedAmount} recibido=${input.amountInCents}`,
       )
       return err(
         new AppError(
           'VALIDATION_ERROR',
           'El monto del webhook no coincide con el del pedido',
-          { expected: order.total, received: input.amountInCents },
+          { expected: expectedAmount, received: input.amountInCents },
         ),
       )
     }
@@ -76,16 +80,25 @@ export class ConfirmPayment {
       return ok({ stateChanged: false, finalStatus: order.status })
     }
 
-    if (order.status !== 'PENDING') {
+    const awaitingStatus: OrderStatus = isCodDeposit ? 'AWAITING_DEPOSIT' : 'PENDING'
+    if (order.status !== awaitingStatus) {
       return ok({ stateChanged: false, finalStatus: order.status })
     }
 
+    // Un anticipo rechazado no cancela el pedido COD: queda esperando para que el
+    // cliente reintente el pago (un cleanup lo cancela si vence el plazo).
+    if (isCodDeposit && input.status !== 'APPROVED') {
+      return ok({ stateChanged: false, finalStatus: order.status })
+    }
+
+    const approvedStatus: OrderStatus = isCodDeposit ? 'COD_CONFIRMED' : 'PAID'
     const targetOrderStatus: OrderStatus =
-      input.status === 'APPROVED' ? 'PAID' : 'CANCELLED'
+      input.status === 'APPROVED' ? approvedStatus : 'CANCELLED'
 
     try {
       const transition = await this.orderRepo.transitionFromPending(order.id, {
         orderStatus: targetOrderStatus,
+        from: awaitingStatus,
         paymentStatus: input.status,
         externalId: input.externalId,
         stockDecrements:

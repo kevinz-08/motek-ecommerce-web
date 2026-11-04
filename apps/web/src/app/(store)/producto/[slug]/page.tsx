@@ -41,6 +41,7 @@ import { UrgencyStockCounter } from '@/components/store/UrgencyStockCounter'
 import { LiveViewersCounter } from '@/components/store/LiveViewersCounter'
 import { PaymentMethodsRow } from '@/components/store/PaymentMethodsRow'
 import { StickyBuyBar } from '@/components/store/StickyBuyBar'
+import { PriceTag } from '@/components/store/PriceTag'
 import { ProductInfoSection } from '@/components/store/ProductInfoSection'
 import {
   RecommendedProducts,
@@ -129,7 +130,7 @@ export default async function ProductPage({ params }: PageProps) {
         <div>
           <p className="text-sm md:text-[13px] c-text-4 mb-1">SKU: {product.sku}</p>
           <h1 className="text-3xl md:text-[28px] lg:text-[32px] font-bold c-text mb-3">{product.name}</h1>
-          <p className="text-4xl md:text-[38px] font-bold c-text mb-3">{formatCOP(product.price)}</p>
+          <PriceTag price={product.price} compareAtPrice={product.compareAtPrice} size="lg" priceClassName="c-text" className="mb-3" />
 
           <div className="mb-2">
             <TrustBadgeRow />

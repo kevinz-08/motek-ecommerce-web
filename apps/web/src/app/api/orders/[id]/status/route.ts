@@ -3,7 +3,7 @@ import { auth } from '@/lib/auth'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001'
 
-const VALID_STATUSES = ['PENDING', 'PAID', 'SHIPPED', 'DELIVERED', 'CANCELLED'] as const
+const VALID_STATUSES = ['PENDING', 'PAID', 'AWAITING_DEPOSIT', 'COD_CONFIRMED', 'SHIPPED', 'DELIVERED', 'CANCELLED'] as const
 type Status = typeof VALID_STATUSES[number]
 
 /**

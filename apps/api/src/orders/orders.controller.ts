@@ -1,6 +1,6 @@
 import {
-  Body, Controller, ForbiddenException, HttpCode,
-  Inject, Logger, Param, Patch, Post,
+  BadRequestException, Body, Controller, ForbiddenException, HttpCode,
+  Inject, Logger, NotFoundException, Param, Patch, Post,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { Throttle } from '@nestjs/throttler'
@@ -66,6 +66,7 @@ export class OrdersController {
     }
 
     let chargeShippingOnline = false
+    let codDepositCents = 0
 
     if (dto.paymentProvider === 'COD') {
       // Por defecto habilitado (sin fila aún en Settings) — el admin puede desactivarlo
@@ -76,6 +77,11 @@ export class OrdersController {
       if (setting && setting.value !== 'true') {
         throw new ForbiddenException('Pago contra entrega no está disponible en este momento')
       }
+      // Anticipo pre-envío: 0 / sin fila = desactivado. El retiro en tienda lo exime en CreateOrder.
+      const depositSetting = await this.prisma.client.settings.findUnique({
+        where: { key: 'COD_DEPOSIT_AMOUNT' },
+      })
+      codDepositCents = Math.max(0, parseInt(depositSetting?.value ?? '0', 10) || 0)
     } else {
       // Pedido pagado en línea (WOMPI/MERCADO_PAGO): si el admin activó
       // SHIPPING_ONLINE_ENABLED, el flete se suma al monto cobrado por la pasarela
@@ -107,6 +113,7 @@ export class OrdersController {
       chargeShippingOnline,
       maxShippingChargeCents: MAX_SHIPPING_CHARGE_CENTS,
       couponCode: dto.couponCode,
+      codDepositCents,
     })
 
     if (!result.ok) throw result.error
@@ -126,9 +133,12 @@ export class OrdersController {
       })
     }
 
-    if (dto.paymentProvider === 'COD') {
-      // COD no tiene webhook de pasarela que confirme el pago — el pedido ya nació
-      // PAID (CreateOrder lo confirmó al crearlo), así que disparamos aquí mismo
+    if (dto.paymentProvider === 'COD' && result.value.order.status === 'AWAITING_DEPOSIT') {
+      // COD con anticipo: el pedido espera el pago del anticipo por Wompi. Correo y despacho
+      // a Vendelo los dispara el webhook (wompi.controller) cuando se aprueba.
+    } else if (dto.paymentProvider === 'COD') {
+      // COD sin anticipo no tiene webhook de pasarela que confirme el pago — el pedido ya nació
+      // COD_CONFIRMED (CreateOrder lo confirmó al crearlo), así que disparamos aquí mismo
       // los efectos secundarios que para pagos online dispara ConfirmPayment.
       await this.emailQueue.enqueue(result.value.order.contactEmail, result.value.order.id)
       // Retiro en tienda: el cliente lo recoge en persona, nunca se despacha
@@ -144,6 +154,27 @@ export class OrdersController {
     }
 
     return result.value
+  }
+
+  /**
+   * Genera una nueva transacción Wompi para el anticipo de un pedido COD que sigue en
+   * AWAITING_DEPOSIT (pago rechazado, widget cerrado, regreso desde la confirmación).
+   * Solo el dueño del pedido: COD exige cuenta, así que no hay pedidos de invitado aquí.
+   */
+  @Post(':id/deposit-transaction')
+  @HttpCode(201)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  @ApiOperation({ summary: 'Reintentar el pago del anticipo de un pedido contraentrega' })
+  async retryDeposit(@Param('id') id: string, @CurrentUser() user: JwtUser) {
+    const order = await this.orderRepo.findById(id)
+    // Mismo error para "no existe" y "no es tuyo": no revela qué pedidos existen.
+    if (!order || !order.userId || order.userId !== user.id) {
+      throw new NotFoundException('Pedido no encontrado')
+    }
+    if (order.status !== 'AWAITING_DEPOSIT' || !order.codDepositAmount) {
+      throw new BadRequestException('Este pedido no está esperando un anticipo')
+    }
+    return { payment: await this.wompiService.createTransaction(order) }
   }
 
   /**
@@ -183,6 +214,20 @@ export class OrdersController {
     @Param('id') id: string,
     @Body() dto: UpdateOrderStatusDto,
   ) {
+    const order = await this.orderRepo.findById(id)
+    if (!order) throw new NotFoundException('Pedido no encontrado')
+    // Estados de contraentrega y de pago en línea no se mezclan (mismo criterio que la ruta web).
+    const isCod = order.paymentProvider === 'COD'
+    const codOnly = dto.status === 'AWAITING_DEPOSIT' || dto.status === 'COD_CONFIRMED'
+    const onlineOnly = dto.status === 'PENDING' || dto.status === 'PAID'
+    if ((isCod && onlineOnly) || (!isCod && codOnly)) {
+      throw new BadRequestException(
+        isCod
+          ? 'Un pedido contraentrega no puede pasar a estados de pago en línea'
+          : 'Ese estado es exclusivo de pedidos contraentrega',
+      )
+    }
+
     if (dto.status === 'CANCELLED') {
       const result = await new CancelOrder(this.orderRepo, this.shipmentRepo, this.shippingPort).execute({ orderId: id })
       if (!result.ok) throw result.error

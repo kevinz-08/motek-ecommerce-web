@@ -1,6 +1,7 @@
 import { Injectable, Inject, Logger } from '@nestjs/common'
 import {
   IOrderRepository,
+  IShipmentRepository,
   IVendeloShippingPort,
   ShipmentExceptionDetail,
 } from '@motek/domain'
@@ -11,8 +12,43 @@ import {
   LabelFormat,
   LabelOutput,
 } from '../../infrastructure/services/VendeloService'
+import {
+  VendeloOrderQueueService,
+  MAX_ATTEMPTS as MAX_QUEUE_ATTEMPTS,
+} from '../../infrastructure/services/VendeloOrderQueueService'
 import type { ApiPickup } from '../../infrastructure/services/vendelo-api.types'
-import { ORDER_REPOSITORY, VENDELO_SHIPPING_PORT } from '../../infrastructure/injection-tokens'
+import { ORDER_REPOSITORY, SHIPMENT_REPOSITORY, VENDELO_SHIPPING_PORT } from '../../infrastructure/injection-tokens'
+
+/**
+ * Estado consolidado del despacho de un pedido para el apartado "Guía Vendelo"
+ * del admin: reúne Order.vendeloOrderId, VendeloOrderQueue y Shipment.
+ */
+export interface ShippingStatusView {
+  orderId: string
+  deliveryMethod: 'HOME_DELIVERY' | 'STORE_PICKUP'
+  orderStatus: string
+  vendeloOrderId: string | null
+  queue: {
+    status: string
+    attempts: number
+    maxAttempts: number
+    lastError: string | null
+    nextRetry: string
+  } | null
+  shipment: {
+    status: string
+    trackingNumber: string | null
+    carrier: string | null
+    labelUrl: string | null
+    updatedAt: string
+  } | null
+  /** Se calcula acá (no en el cliente) para que la máquina de estados viva en un solo lugar. */
+  actions: {
+    canRequeue: boolean
+    canCreateShipment: boolean
+    canGenerateLabel: boolean
+  }
+}
 
 /**
  * Servicio de aplicación NestJS para operaciones logísticas admin que no tienen
@@ -28,9 +64,58 @@ export class ShippingAdminService {
 
   constructor(
     @Inject(ORDER_REPOSITORY) private readonly orderRepo: IOrderRepository,
+    @Inject(SHIPMENT_REPOSITORY) private readonly shipmentRepo: IShipmentRepository,
     @Inject(VENDELO_SHIPPING_PORT) private readonly shippingPort: IVendeloShippingPort,
     private readonly vendeloService: VendeloService,
+    private readonly orderQueue: VendeloOrderQueueService,
   ) {}
+
+  /** Estado consolidado del despacho de un pedido. null si el pedido no existe. */
+  async getShippingStatus(orderId: string): Promise<ShippingStatusView | null> {
+    const order = await this.orderRepo.findById(orderId)
+    if (!order) return null
+
+    const [[vendeloRow], shipment, queue] = await Promise.all([
+      this.orderRepo.findVendeloOrderIdsBatch([orderId]),
+      this.shipmentRepo.findByOrderId(orderId),
+      this.orderQueue.findByOrderId(orderId),
+    ])
+
+    const vendeloOrderId = vendeloRow?.vendeloOrderId ?? null
+    const isPickup = order.deliveryMethod === 'STORE_PICKUP'
+    const cancelled = order.status === 'CANCELLED'
+    const queueInFlight = queue?.status === 'PENDING' || queue?.status === 'PROCESSING'
+
+    return {
+      orderId,
+      deliveryMethod: order.deliveryMethod,
+      orderStatus: order.status,
+      vendeloOrderId,
+      queue: queue
+        ? {
+            status: queue.status,
+            attempts: queue.attempts,
+            maxAttempts: MAX_QUEUE_ATTEMPTS,
+            lastError: queue.lastError,
+            nextRetry: queue.nextRetry.toISOString(),
+          }
+        : null,
+      shipment: shipment
+        ? {
+            status: shipment.status,
+            trackingNumber: shipment.trackingNumber,
+            carrier: shipment.carrier,
+            labelUrl: shipment.labelUrl,
+            updatedAt: shipment.updatedAt.toISOString(),
+          }
+        : null,
+      actions: {
+        canRequeue: !isPickup && !cancelled && !vendeloOrderId && !queueInFlight,
+        canCreateShipment: !isPickup && !cancelled && !!vendeloOrderId && !shipment,
+        canGenerateLabel: !isPickup && !cancelled && !!vendeloOrderId,
+      },
+    }
+  }
 
   /**
    * Genera etiquetas PDF/URL para los pedidos indicados.

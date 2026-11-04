@@ -54,6 +54,7 @@ export async function GET(
     total: order.total,
     paymentProvider: order.paymentProvider,
     shippingTotal: order.shippingTotal,
+    codDepositAmount: order.codDepositAmount,
     vendeloOrderId: order.vendeloOrderId,
     policiesAcceptedAt: order.policiesAcceptedAt,
     buyer: {

@@ -6,6 +6,7 @@ import { OrderStatusBadge } from '@/components/store/OrderStatusBadge'
 import { OrderItemThumbnail } from '@/components/store/OrderItemThumbnail'
 import { CartCleaner } from '@/components/checkout/CartCleaner'
 import { OrderStatusPoller } from '@/components/checkout/OrderStatusPoller'
+import { PayDepositSection } from '@/components/checkout/PayDepositSection'
 
 interface PageProps {
   searchParams: Promise<{ orderId?: string; token?: string }>
@@ -92,26 +93,37 @@ export default async function ConfirmacionPage({ searchParams }: PageProps) {
   const order = await getOrderConfirmation(orderId, access)
   if (!order) return <NotFound isGuest={isGuestAccess} />
 
-  const isPaid = order.status === 'PAID'
+  const isPaid = order.status === 'PAID' || order.status === 'COD_CONFIRMED'
   const isPending = order.status === 'PENDING'
   const isCod = order.paymentProvider === 'COD'
+  // COD con anticipo sin pagar: el pedido no está confirmado ni se despacha todavía.
+  const isAwaitingDeposit = order.status === 'AWAITING_DEPOSIT'
+  const hasDeposit = isCod && order.codDepositAmount > 0
+  const codBalance = Math.max(0, order.total - order.codDepositAmount)
 
   return (
     <div className="min-h-screen bg-gray-50 py-10">
       {isPaid && <CartCleaner orderId={order.id} />}
       {isPending && <OrderStatusPoller orderId={order.id} trackingToken={token} />}
+      {isAwaitingDeposit && <OrderStatusPoller orderId={order.id} trackingToken={token} waitingFor="AWAITING_DEPOSIT" />}
       <div className="max-w-2xl mx-auto px-4 sm:px-6">
 
         {/* ── Hero de estado ─────────────────────────────────────────────── */}
         <div className="text-center mb-8">
-          <div className="text-6xl mb-4">{isCod ? '📦' : isPaid ? '✅' : isPending ? '⏳' : '📦'}</div>
+          <div className="text-6xl mb-4">{isAwaitingDeposit ? '⏳' : isCod ? '📦' : isPaid ? '✅' : isPending ? '⏳' : '📦'}</div>
           <h1 className="text-3xl font-black text-gray-900 mb-2">
-            {isCod
+            {isAwaitingDeposit
+              ? 'Falta pagar tu anticipo'
+              : isCod
               ? '¡Pedido confirmado!'
               : isPaid ? '¡Pago confirmado!' : isPending ? 'Pago en procesamiento' : 'Pedido actualizado'}
           </h1>
           <p className="text-gray-500 max-w-sm mx-auto">
-            {isCod
+            {isAwaitingDeposit
+              ? 'Tu pedido se despacha cuando recibimos el anticipo. Ese valor se descuenta de lo que pagas al recibir.'
+              : hasDeposit
+              ? `Recibimos tu anticipo. Pagas en efectivo al repartidor el saldo de ${formatCOP(codBalance)} cuando recibas tu pedido.`
+              : isCod
               ? 'Pagas en efectivo al repartidor cuando recibas tu pedido. Recibirás un email con los detalles.'
               : isPaid
                 ? 'Tu pedido fue aprobado. Recibirás un email con los detalles.'
@@ -175,10 +187,22 @@ export default async function ConfirmacionPage({ searchParams }: PageProps) {
           {/* Total */}
           <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex items-center justify-between">
             <span className="text-sm font-semibold text-gray-600">
-              {isCod ? 'Total a pagar al recibir' : 'Total pagado'}
+              {hasDeposit ? 'Total del pedido' : isCod ? 'Total a pagar al recibir' : 'Total pagado'}
             </span>
             <span className="text-xl font-black text-gray-900">{formatCOP(order.total)}</span>
           </div>
+          {hasDeposit && (
+            <div className="px-6 py-3 bg-gray-50 border-t border-gray-100 space-y-1 text-sm">
+              <div className="flex items-center justify-between text-gray-600">
+                <span>{isAwaitingDeposit ? 'Anticipo por pagar' : 'Anticipo pagado'}</span>
+                <span className="font-semibold">{formatCOP(order.codDepositAmount)}</span>
+              </div>
+              <div className="flex items-center justify-between text-gray-900 font-bold">
+                <span>Saldo a pagar al recibir</span>
+                <span>{formatCOP(codBalance)}</span>
+              </div>
+            </div>
+          )}
 
           {/* Dirección + método de pago */}
           <div className="px-6 py-5 border-t border-gray-100 grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -214,6 +238,9 @@ export default async function ConfirmacionPage({ searchParams }: PageProps) {
             </div>
           </div>
         </div>
+
+        {/* COD con anticipo pendiente: solo el dueño con sesión puede reintentar el pago. */}
+        {isAwaitingDeposit && !isGuestAccess && <PayDepositSection orderId={order.id} />}
 
         {/* ── Acciones ───────────────────────────────────────────────────── */}
         <div className="flex flex-col sm:flex-row gap-3 mt-6">

@@ -1,6 +1,8 @@
 'use client'
 
 import Link from 'next/link'
+import { PriceTag } from '@/components/store/PriceTag'
+import { cartSavings } from '@/lib/pricing'
 import Image from 'next/image'
 import { useState } from 'react'
 import { useCart } from '@/lib/cart'
@@ -17,6 +19,7 @@ export default function CartPage() {
   const [shippingQuote, setShippingQuote] = useState<ShippingQuoteResult | null>(null)
 
   const cartTotal  = items.reduce((acc, i) => acc + i.product.price * i.quantity, 0)
+  const savings    = cartSavings(items)
   const itemsCount = items.reduce((acc, i) => acc + i.quantity, 0)
   const shippingCost = shippingQuote && !shippingQuote.freeShipping ? shippingQuote.quotedShippingTotal : 0
   const estimatedTotal = cartTotal + shippingCost
@@ -115,9 +118,7 @@ export default function CartPage() {
                     </h3>
                   </Link>
                   <p className="text-xs text-gray-400 mt-0.5 font-mono">SKU: {product.sku}</p>
-                  <p className="text-base font-black text-gray-900 mt-2">
-                    {formatCOP(product.price * quantity)}
-                  </p>
+                  <PriceTag price={product.price} compareAtPrice={product.compareAtPrice} quantity={quantity} size="sm" className="mt-2" />
                   {quantity > 1 && (
                     <p className="text-xs text-gray-400 mt-0.5">
                       {formatCOP(product.price)} × {quantity}
@@ -190,6 +191,13 @@ export default function CartPage() {
                   </div>
                 ))}
               </div>
+
+              {savings > 0 && (
+                <div className="flex justify-between text-sm text-green-700 mb-4">
+                  <span className="font-medium">Estás ahorrando</span>
+                  <span className="font-semibold">{formatCOP(savings)}</span>
+                </div>
+              )}
 
               {/* Envío */}
               <ShippingQuoteCalculator

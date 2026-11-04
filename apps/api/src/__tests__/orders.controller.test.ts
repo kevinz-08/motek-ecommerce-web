@@ -100,7 +100,7 @@ const mockShipmentRepo = {
   updateTrackingDetails: vi.fn().mockResolvedValue(undefined),
 }
 const mockProductRepo = { findById: vi.fn(), save: vi.fn(), findAll: vi.fn() }
-const mockWompiService = { initiate: vi.fn(), validateWebhook: vi.fn() }
+const mockWompiService = { initiate: vi.fn(), validateWebhook: vi.fn(), createTransaction: vi.fn() }
 const mockEmailService = {
   sendOrderReceived: vi.fn().mockResolvedValue(undefined),
 }
@@ -306,7 +306,7 @@ describe('OrdersController', () => {
       expect(execute).toHaveBeenCalledWith(expect.objectContaining({ chargeShippingOnline: false }))
     })
 
-    it('COD nunca lee SHIPPING_ONLINE_ENABLED — solo COD_ENABLED', async () => {
+    it('COD nunca lee SHIPPING_ONLINE_ENABLED — solo COD_ENABLED y COD_DEPOSIT_AMOUNT', async () => {
       mockPrismaClient.settings.findUnique.mockResolvedValueOnce({ value: 'true' }) // COD_ENABLED
       const { CreateOrder } = await import('@motek/domain')
       const execute = vi.fn().mockResolvedValue({ ok: true, value: { order: { ...mockOrder, status: 'PAID' }, payment: null, shippingQuoteFallback: false } })
@@ -316,8 +316,58 @@ describe('OrdersController', () => {
 
       await controller.create({ ...dto, paymentProvider: 'COD' }, mockUser)
 
-      expect(mockPrismaClient.settings.findUnique).toHaveBeenCalledTimes(1)
+      expect(mockPrismaClient.settings.findUnique).toHaveBeenCalledTimes(2)
       expect(mockPrismaClient.settings.findUnique).toHaveBeenCalledWith({ where: { key: 'COD_ENABLED' } })
+      expect(mockPrismaClient.settings.findUnique).toHaveBeenCalledWith({ where: { key: 'COD_DEPOSIT_AMOUNT' } })
+    })
+
+    describe('COD con anticipo', () => {
+      it('pasa el anticipo configurado al use case', async () => {
+        mockPrismaClient.settings.findUnique
+          .mockResolvedValueOnce({ value: 'true' })    // COD_ENABLED
+          .mockResolvedValueOnce({ value: '1500000' }) // COD_DEPOSIT_AMOUNT
+        const { CreateOrder } = await import('@motek/domain')
+        const execute = vi.fn().mockResolvedValue({ ok: true, value: { order: { ...mockOrder, status: 'AWAITING_DEPOSIT' }, payment: mockPayment, shippingQuoteFallback: false } })
+        vi.mocked(CreateOrder).mockImplementationOnce(function () {
+          return { execute }
+        })
+
+        await controller.create({ ...dto, paymentProvider: 'COD' }, mockUser)
+
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({ codDepositCents: 1500000 }))
+      })
+
+      it('AWAITING_DEPOSIT: no encola correo ni Vendelo (los dispara el webhook del anticipo)', async () => {
+        mockPrismaClient.settings.findUnique
+          .mockResolvedValueOnce({ value: 'true' })
+          .mockResolvedValueOnce({ value: '1500000' })
+        const { CreateOrder } = await import('@motek/domain')
+        const execute = vi.fn().mockResolvedValue({ ok: true, value: { order: { ...mockOrder, status: 'AWAITING_DEPOSIT' }, payment: mockPayment, shippingQuoteFallback: false } })
+        vi.mocked(CreateOrder).mockImplementationOnce(function () {
+          return { execute }
+        })
+
+        await controller.create({ ...dto, paymentProvider: 'COD' }, mockUser)
+
+        expect(mockEmailQueue.enqueue).not.toHaveBeenCalled()
+        expect(mockVendeloOrderQueue.enqueue).not.toHaveBeenCalled()
+        expect(mockEmailService.sendOrderReceived).not.toHaveBeenCalled()
+      })
+
+      it('sin fila COD_DEPOSIT_AMOUNT el anticipo es 0', async () => {
+        mockPrismaClient.settings.findUnique
+          .mockResolvedValueOnce({ value: 'true' })
+          .mockResolvedValueOnce(null)
+        const { CreateOrder } = await import('@motek/domain')
+        const execute = vi.fn().mockResolvedValue({ ok: true, value: { order: { ...mockOrder, status: 'COD_CONFIRMED' }, payment: null, shippingQuoteFallback: false } })
+        vi.mocked(CreateOrder).mockImplementationOnce(function () {
+          return { execute }
+        })
+
+        await controller.create({ ...dto, paymentProvider: 'COD' }, mockUser)
+
+        expect(execute).toHaveBeenCalledWith(expect.objectContaining({ codDepositCents: 0 }))
+      })
     })
 
     it('shippingQuoteFallback:true dispara un warning en el logger', async () => {
@@ -337,10 +387,33 @@ describe('OrdersController', () => {
 
   describe('PATCH /orders/:id/status — updateStatus()', () => {
     it('actualiza el estado y retorna { success: true }', async () => {
+      mockOrderRepo.findById.mockResolvedValue({ ...mockOrder, status: 'PAID', paymentProvider: 'WOMPI' })
       const result = await controller.updateStatus('order-abc123', { status: 'SHIPPED' })
 
       expect(mockOrderRepo.updateStatus).toHaveBeenCalledWith('order-abc123', 'SHIPPED')
       expect(result).toEqual({ success: true, status: 'SHIPPED' })
+    })
+
+    it('un pedido contraentrega rechaza los estados de pago en línea', async () => {
+      mockOrderRepo.findById.mockResolvedValue({ ...mockOrder, status: 'COD_CONFIRMED', paymentProvider: 'COD' })
+
+      await expect(controller.updateStatus('order-abc123', { status: 'PAID' })).rejects.toThrow(/contraentrega/)
+      expect(mockOrderRepo.updateStatus).not.toHaveBeenCalled()
+    })
+
+    it('un pedido en línea rechaza los estados exclusivos de contraentrega', async () => {
+      mockOrderRepo.findById.mockResolvedValue({ ...mockOrder, status: 'PAID', paymentProvider: 'WOMPI' })
+
+      await expect(controller.updateStatus('order-abc123', { status: 'COD_CONFIRMED' })).rejects.toThrow(/exclusivo/)
+      expect(mockOrderRepo.updateStatus).not.toHaveBeenCalled()
+    })
+
+    it('un pedido contraentrega acepta COD_CONFIRMED', async () => {
+      mockOrderRepo.findById.mockResolvedValue({ ...mockOrder, status: 'AWAITING_DEPOSIT', paymentProvider: 'COD' })
+
+      const result = await controller.updateStatus('order-abc123', { status: 'COD_CONFIRMED' })
+
+      expect(result).toEqual({ success: true, status: 'COD_CONFIRMED' })
     })
 
     it('CANCELLED de un pedido ya en Vendelo: lo anula en Vendelo y luego localmente', async () => {
@@ -365,6 +438,32 @@ describe('OrdersController', () => {
       await expect(controller.updateStatus('order-abc123', { status: 'CANCELLED' }))
         .rejects.toMatchObject({ code: 'INTERNAL_ERROR' })
       expect(mockOrderRepo.updateStatus).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('POST /orders/:id/deposit-transaction — retryDeposit()', () => {
+    const depositOrder = { ...mockOrder, status: 'AWAITING_DEPOSIT', paymentProvider: 'COD', codDepositAmount: 1500000 }
+
+    it('devuelve una transacción nueva por el anticipo al dueño del pedido', async () => {
+      mockOrderRepo.findById.mockResolvedValue(depositOrder)
+      mockWompiService.createTransaction.mockResolvedValue(mockPayment)
+
+      const result = await controller.retryDeposit('order-abc123', mockUser)
+
+      expect(result).toEqual({ payment: mockPayment })
+      expect(mockWompiService.createTransaction).toHaveBeenCalledWith(depositOrder)
+    })
+
+    it('404 si el pedido es de otro usuario (no revela que existe)', async () => {
+      mockOrderRepo.findById.mockResolvedValue({ ...depositOrder, userId: 'otro-usuario' })
+
+      await expect(controller.retryDeposit('order-abc123', mockUser)).rejects.toThrow('Pedido no encontrado')
+    })
+
+    it('400 si el pedido ya no espera el anticipo', async () => {
+      mockOrderRepo.findById.mockResolvedValue({ ...depositOrder, status: 'COD_CONFIRMED' })
+
+      await expect(controller.retryDeposit('order-abc123', mockUser)).rejects.toThrow('no está esperando un anticipo')
     })
   })
 })

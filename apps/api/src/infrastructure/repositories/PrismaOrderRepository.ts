@@ -37,10 +37,10 @@ type PrismaOrderRow = {
   id: string; userId: string | null; guestId: string | null
   contactEmail: string; trackingToken: string
   status: string; total: number
-  shippingAddress: unknown; paymentProvider: string; shippingTotal: number; createdAt: Date
+  shippingAddress: unknown; paymentProvider: string; shippingTotal: number; codDepositAmount: number; createdAt: Date
   deliveryMethod: string
   buyerIdType: string; buyerIdNumber: string; buyerBusinessName: string | null
-  items?: Array<{ id: string; orderId: string; productId: string; quantity: number; priceAtPurchase: number }>
+  items?: Array<{ id: string; orderId: string; productId: string; quantity: number; priceAtPurchase: number; compareAtPriceAtPurchase: number | null }>
   payment?: { id: string; orderId: string; provider: string; externalId: string | null; status: string; amount: number; createdAt: Date } | null
 }
 
@@ -51,6 +51,7 @@ function toDomainItem(i: NonNullable<PrismaOrderRow['items']>[number]): OrderIte
     productId: i.productId,
     quantity: i.quantity,
     priceAtPurchase: i.priceAtPurchase,
+    compareAtPriceAtPurchase: i.compareAtPriceAtPurchase,
   }
 }
 
@@ -84,6 +85,7 @@ function toDomain(o: PrismaOrderRow): Order {
       businessName: o.buyerBusinessName ?? undefined,
     },
     paymentProvider: o.paymentProvider as PaymentProvider,
+    codDepositAmount: o.codDepositAmount,
     createdAt: o.createdAt,
     items: o.items?.map(toDomainItem),
     payment: o.payment ? toDomainPayment(o.payment) : undefined,
@@ -197,8 +199,14 @@ export class PrismaOrderRepository implements IOrderRepository {
     const o = await this.prisma.client.order.create({
       data: {
         ...orderCreateData(input),
+        // Anticipo COD: el pedido espera el anticipo y su único Payment es ese cobro Wompi.
+        ...(input.codDepositAmount
+          ? { status: 'AWAITING_DEPOSIT' as const, codDepositAmount: input.codDepositAmount }
+          : {}),
         payment: {
-          create: { provider: input.paymentProvider, amount: input.total },
+          create: input.codDepositAmount
+            ? { provider: 'WOMPI' as const, amount: input.codDepositAmount }
+            : { provider: input.paymentProvider, amount: input.total },
         },
       },
       include: { items: true, payment: true },
@@ -211,7 +219,7 @@ export class PrismaOrderRepository implements IOrderRepository {
       const created = await tx.order.create({
         data: {
           ...orderCreateData(input),
-          status: 'PAID',
+          status: 'COD_CONFIRMED',
           payment: {
             create: { provider: input.paymentProvider, amount: input.total, status: 'APPROVED' },
           },
@@ -257,12 +265,13 @@ export class PrismaOrderRepository implements IOrderRepository {
       orderStatus: OrderStatus
       paymentStatus: PaymentStatus
       externalId: string
+      from?: OrderStatus
       stockDecrements?: Array<{ productId: string; quantity: number }>
     },
   ): Promise<PaymentTransitionResult> {
     return this.prisma.client.$transaction(async (tx) => {
       const updated = await tx.order.updateMany({
-        where: { id: orderId, status: 'PENDING' },
+        where: { id: orderId, status: to.from ?? 'PENDING' },
         data: { status: to.orderStatus },
       })
       if (updated.count === 0) return { applied: false }
@@ -293,7 +302,7 @@ export class PrismaOrderRepository implements IOrderRepository {
     const today = new Date()
     today.setHours(0, 0, 0, 0)
     const result = await this.prisma.client.order.aggregate({
-      where: { status: { notIn: ['PENDING', 'CANCELLED'] }, createdAt: { gte: today } },
+      where: { status: { notIn: ['PENDING', 'AWAITING_DEPOSIT', 'CANCELLED'] }, createdAt: { gte: today } },
       _sum: { total: true },
     })
     return result._sum.total ?? 0
@@ -389,7 +398,7 @@ export class PrismaOrderRepository implements IOrderRepository {
 
   async hasApprovedOrders(userId: string): Promise<boolean> {
     const order = await this.prisma.client.order.findFirst({
-      where: { userId, status: { in: ['PAID', 'SHIPPED', 'DELIVERED'] } },
+      where: { userId, status: { in: ['PAID', 'COD_CONFIRMED', 'SHIPPED', 'DELIVERED'] } },
       select: { id: true },
     })
     return order !== null

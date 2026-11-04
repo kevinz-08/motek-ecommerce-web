@@ -27,7 +27,7 @@ import { Product } from '@motek/domain'
 import { useCart } from '@/lib/cart'
 import { useCartDrawer } from '@/lib/cart-drawer'
 import { cloudinaryUrl, IMAGE_BLUR_PLACEHOLDER } from '@/lib/cloudinary'
-import { formatCOP } from '@/lib/format'
+import { PriceTag } from './PriceTag'
 import { Card, Badge } from '@/components/ui'
 
 interface ProductCardProps {
@@ -203,9 +203,7 @@ export function ProductCard({ product, priority = false }: ProductCardProps) {
         </Link>
 
         {/* Precio */}
-        <p className="text-base font-black text-gray-900 mt-1 tracking-tight">
-          {formatCOP(product.price)}
-        </p>
+        <PriceTag price={product.price} compareAtPrice={product.compareAtPrice} size="sm" className="mt-1" />
       </div>
     </Card>
   )

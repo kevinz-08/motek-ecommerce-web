@@ -1,4 +1,4 @@
-import { IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Min, ValidateNested } from 'class-validator'
+import { IsArray, IsBoolean, IsInt, IsNumber, IsOptional, IsString, Min, ValidateIf, ValidateNested } from 'class-validator'
 import { Type } from 'class-transformer'
 import { ApiPropertyOptional } from '@nestjs/swagger'
 import { MotorcycleCompatibilityDto } from './motorcycle-compatibility.dto'
@@ -8,6 +8,8 @@ export class UpdateProductDto {
   @ApiPropertyOptional() @IsOptional() @IsString() slug?: string
   @ApiPropertyOptional() @IsOptional() @IsString() description?: string
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) price?: number
+  @ApiPropertyOptional({ description: 'Precio de referencia tachado en centavos COP. null = sin precio ancla. Debe ser > price', nullable: true })
+  @IsOptional() @ValidateIf((_, v) => v !== null) @IsInt() @Min(1) compareAtPrice?: number | null
   @ApiPropertyOptional() @IsOptional() @IsInt() @Min(0) stock?: number
   @ApiPropertyOptional() @IsOptional() @IsString() sku?: string
   @ApiPropertyOptional() @IsOptional() @IsString() categoryId?: string
