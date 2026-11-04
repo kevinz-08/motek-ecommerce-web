@@ -974,3 +974,18 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/api/src/__tests__/VendeloOrderQueueService.test.ts` — 7 tests de `requeue()`.
 
 **Verificación:** `tsc --noEmit` limpio en `apps/api` y `apps/web`; tests de `VendeloOrderQueueService` 17/17. Pendiente: diagnóstico del pedido del domingo en producción (requiere acceso a `motek-app-web`/BD).
+
+---
+
+## 2026-11-03 — Precio tachado (precio ancla `compareAtPrice`) con historial de precios
+
+**Problema/Motivo:** La tienda no podía mostrar un precio "antes" tachado para comunicar un descuento. Portado desde `electro-motos-tdk` (entrada #150, Fase 1). Para cumplir la Ley 1480 / SIC, el precio de referencia debe haber sido un precio realmente cobrado, por eso se guarda un historial.
+
+**Cambios:**
+
+- `packages/database/prisma/schema.prisma` y migración `20261103120000_product_compare_at_price` — `Product.compareAtPrice` con `CHECK (compareAtPrice > price)`, tabla `ProductPriceHistory` (con backfill del precio vigente) y `OrderItem.compareAtPriceAtPurchase`. **La migración está sin aplicar a producción.**
+- `packages/domain` — `validateProductPricing`, `getDiscountPercent`, `hasCompareAtPrice` (`Product.ts`); `OrderItem`/`CreateOrderInput`; `CreateOrder` guarda el ancla vigente por ítem. Tests: `ProductPricing.test.ts` (nuevo) y caso en `CreateOrder.test.ts`.
+- `apps/api` — DTOs de producto con `compareAtPrice` (nullable), validación de la invariante en crear y en edición parcial (contra BD), historial `ADMIN_CREATE`/`ADMIN_UPDATE` en `PrismaProductRepository`, `compareAtPriceAtPurchase` en `PrismaOrderRepository`, y `PrismaStockSyncRepository.bulkUpdateStockAndPrice` limpia el ancla cuando el sync del ERP alcanza o supera ese precio (el CHECK habría roto toda la transacción) y registra `ERP_SYNC`.
+- `apps/web` — `PriceTag` (tachado + precio + badge `-X%` con el acento de marca) en tarjeta, PDP y carrito; `lib/pricing.ts` (`cartSavings`) con fila "Estás ahorrando" en carrito y checkout; campo "Precio anterior" en `ProductEditForm`; repositorio web y página admin pasan `compareAtPrice`.
+
+**Verificación:** `tsc --noEmit` limpio en api y web; tests de dominio 180/180 y de API 310/310; ESLint sin errores en los archivos tocados.
