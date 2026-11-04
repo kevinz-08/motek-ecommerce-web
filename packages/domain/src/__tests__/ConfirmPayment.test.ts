@@ -209,4 +209,74 @@ describe('ConfirmPayment', () => {
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe('NOT_FOUND')
   })
+
+  // ── Anticipo pre-envío de contraentrega ─────────────────────────────────────
+  describe('COD con anticipo', () => {
+    const depositOrder = () => makePendingOrder({
+      paymentProvider: 'COD', status: 'AWAITING_DEPOSIT', total: 5000000, codDepositAmount: 1500000,
+    })
+
+    function repoFor(order: Order, applied = true) {
+      const transitionFromPending = vi.fn<() => Promise<PaymentTransitionResult>>().mockResolvedValue({ applied })
+      const orderRepo = {
+        findById: vi.fn().mockResolvedValue(order),
+        transitionFromPending,
+      } as unknown as IOrderRepository
+      return { orderRepo, transitionFromPending }
+    }
+
+    it('APPROVED: AWAITING_DEPOSIT → COD_CONFIRMED, desde AWAITING_DEPOSIT y descontando stock', async () => {
+      const { orderRepo, transitionFromPending } = repoFor(depositOrder())
+      const result = await new ConfirmPayment(orderRepo).execute({
+        orderId: 'order-1', externalId: 'ext-1', status: 'APPROVED', amountInCents: 1500000,
+      })
+
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.value.stateChanged).toBe(true)
+        expect(result.value.finalStatus).toBe('COD_CONFIRMED')
+      }
+      expect(transitionFromPending).toHaveBeenCalledWith('order-1', expect.objectContaining({
+        orderStatus: 'COD_CONFIRMED',
+        from: 'AWAITING_DEPOSIT',
+        stockDecrements: [{ productId: 'prod-1', quantity: 2 }],
+      }))
+    })
+
+    it('valida el monto contra el anticipo, no contra el total del pedido', async () => {
+      const { orderRepo, transitionFromPending } = repoFor(depositOrder())
+      const result = await new ConfirmPayment(orderRepo).execute({
+        orderId: 'order-1', externalId: 'ext-1', status: 'APPROVED', amountInCents: 5000000,
+      })
+
+      expect(result.ok).toBe(false)
+      if (!result.ok) expect(result.error.code).toBe('VALIDATION_ERROR')
+      expect(transitionFromPending).not.toHaveBeenCalled()
+    })
+
+    it('anticipo rechazado: el pedido sigue esperando (no se cancela) para permitir reintento', async () => {
+      const { orderRepo, transitionFromPending } = repoFor(depositOrder())
+      const result = await new ConfirmPayment(orderRepo).execute({
+        orderId: 'order-1', externalId: 'ext-1', status: 'DECLINED', amountInCents: 1500000,
+      })
+
+      expect(result.ok).toBe(true)
+      if (result.ok) {
+        expect(result.value.stateChanged).toBe(false)
+        expect(result.value.finalStatus).toBe('AWAITING_DEPOSIT')
+      }
+      expect(transitionFromPending).not.toHaveBeenCalled()
+    })
+
+    it('idempotencia: un pedido que ya salió de AWAITING_DEPOSIT no vuelve a transicionar', async () => {
+      const { orderRepo, transitionFromPending } = repoFor({ ...depositOrder(), status: 'COD_CONFIRMED' })
+      const result = await new ConfirmPayment(orderRepo).execute({
+        orderId: 'order-1', externalId: 'ext-1', status: 'APPROVED', amountInCents: 1500000,
+      })
+
+      expect(result.ok).toBe(true)
+      if (result.ok) expect(result.value.stateChanged).toBe(false)
+      expect(transitionFromPending).not.toHaveBeenCalled()
+    })
+  })
 })

@@ -67,7 +67,7 @@ export class CancelOrder {
 
     if (!vendeloOrderId) {
       await this.orderRepo.updateStatus(input.orderId, 'CANCELLED')
-      if (order.status === 'PAID') await this.orderRepo.restockItems(input.orderId)
+      if (order.status === 'PAID' || order.status === 'COD_CONFIRMED') await this.orderRepo.restockItems(input.orderId)
       return ok({ alreadyCancelled: false, cancelledInVendelo: false })
     }
 
