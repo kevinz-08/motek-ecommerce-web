@@ -100,7 +100,7 @@ const mockShipmentRepo = {
   updateTrackingDetails: vi.fn().mockResolvedValue(undefined),
 }
 const mockProductRepo = { findById: vi.fn(), save: vi.fn(), findAll: vi.fn() }
-const mockWompiService = { initiate: vi.fn(), validateWebhook: vi.fn() }
+const mockWompiService = { initiate: vi.fn(), validateWebhook: vi.fn(), createTransaction: vi.fn() }
 const mockEmailService = {
   sendOrderReceived: vi.fn().mockResolvedValue(undefined),
 }
@@ -446,7 +446,7 @@ describe('OrdersController', () => {
 
     it('devuelve una transacción nueva por el anticipo al dueño del pedido', async () => {
       mockOrderRepo.findById.mockResolvedValue(depositOrder)
-      mockWompiService.createTransaction = vi.fn().mockResolvedValue(mockPayment)
+      mockWompiService.createTransaction.mockResolvedValue(mockPayment)
 
       const result = await controller.retryDeposit('order-abc123', mockUser)
 
