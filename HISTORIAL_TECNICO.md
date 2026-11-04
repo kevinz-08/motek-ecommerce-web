@@ -1038,3 +1038,15 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/web/src/app/(store)/legal/politica-de-cambios/page.tsx` — viñeta sobre la retención del anticipo (solo si está activo), enlazada a la sección 7.
 
 **Verificación:** `tsc --noEmit` y ESLint limpios en los archivos tocados. **Pendiente:** revisión legal del texto de retención del anticipo (derecho de retracto, Ley 1480) antes de activar un monto; prueba visual de los toasts en escritorio y móvil.
+
+---
+
+## 2026-11-04 — El carrito (drawer) ya no se abre solo al agregar un producto
+
+**Problema/Motivo:** Al agregar un producto, el drawer del carrito se abría de inmediato e interrumpía la navegación. Ahora solo se abre cuando el cliente pulsa el ícono del carrito.
+
+**Cambios:**
+
+- `apps/web/src/components/store/AddToCartWithQuantity.tsx` y `apps/web/src/components/store/ProductCard.tsx` — se elimina la llamada a `open()` de `useCartDrawer` tras `addItem`; queda el toast "Agregado al carrito". El drawer sigue abriéndose con `CartIcon` (`toggle`).
+
+**Verificación:** `tsc --noEmit` y ESLint limpios en los archivos tocados. Pendiente: prueba visual (agregar desde la tarjeta y desde la ficha, y abrir el carrito con el ícono).
