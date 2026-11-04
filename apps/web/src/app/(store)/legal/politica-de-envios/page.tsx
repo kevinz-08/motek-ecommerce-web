@@ -1,4 +1,6 @@
 import type { Metadata } from 'next'
+import { getCachedCodDepositCents } from '@/lib/cache'
+import { formatCOP } from '@/lib/format'
 
 export const metadata: Metadata = {
   title: 'Política de Envíos',
@@ -8,7 +10,10 @@ export const metadata: Metadata = {
   robots: { index: true, follow: true },
 }
 
-export default function PoliticaDeEnviosPage() {
+export default async function PoliticaDeEnviosPage() {
+  // Monto vigente del anticipo (0 = sin anticipo): lo configura el admin en /admin/configuracion.
+  const depositCents = await getCachedCodDepositCents()
+
   return (
     <>
       {/* Encabezado */}
@@ -20,7 +25,7 @@ export default function PoliticaDeEnviosPage() {
           Política de Envíos
         </h1>
         <p className="text-sm text-gray-400 mt-2">
-          Última actualización: <time dateTime="2026-06-01">01 de junio de 2026</time>
+          Última actualización: <time dateTime="2026-11-04">04 de noviembre de 2026</time>
         </p>
       </header>
 
@@ -211,6 +216,51 @@ export default function PoliticaDeEnviosPage() {
             </li>
             <li>Alteración o modificación del producto.</li>
             <li>Desgaste natural por uso normal.</li>
+          </ul>
+        </section>
+
+        {/* Pago contra entrega y anticipo */}
+        <section aria-labelledby="seccion-contraentrega">
+          <h2 id="seccion-contraentrega" className="text-lg font-bold text-gray-900 mb-3">
+            7. Pago Contra Entrega y Anticipo
+          </h2>
+          <ul className="list-disc list-outside pl-5 space-y-1.5 text-gray-700">
+            <li>
+              El pago contra entrega está disponible para clientes con cuenta y para
+              envíos a domicilio. El valor del pedido se paga en efectivo al
+              repartidor al recibirlo. El costo de envío en esta modalidad incluye el
+              costo de recaudo del dinero y se muestra en el resumen del pedido antes
+              de confirmar.
+            </li>
+            {depositCents > 0 && (
+              <>
+                <li>
+                  <strong>Anticipo:</strong> para confirmar un pedido contra entrega a
+                  domicilio se solicita un anticipo de{' '}
+                  <strong>{formatCOP(depositCents)}</strong>, que se paga en línea
+                  (Wompi) al hacer el pedido. Ese valor se descuenta del total: al
+                  recibir el pedido solo se paga en efectivo el saldo restante.
+                </li>
+                <li>
+                  El pedido se despacha una vez se confirma el anticipo. Si el anticipo
+                  no se paga dentro de las <strong>24 horas</strong> siguientes, el
+                  pedido se cancela automáticamente, sin ningún cobro.
+                </li>
+                <li>
+                  <strong>Se devuelve el anticipo completo</strong> si el cliente
+                  cancela el pedido antes del despacho, o si MOTEK STORE no puede
+                  despacharlo o se presenta una falla cubierta por la garantía.
+                </li>
+                <li>
+                  <strong>El anticipo se retiene</strong> cuando el cliente rechaza el
+                  pedido al momento de la entrega o no lo recibe sin causa justificada;
+                  con él se cubre el flete de ida y regreso.
+                </li>
+                <li>
+                  Los pedidos con retiro en tienda están exentos del anticipo.
+                </li>
+              </>
+            )}
           </ul>
         </section>
 

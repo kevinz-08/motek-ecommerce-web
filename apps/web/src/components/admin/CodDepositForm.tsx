@@ -10,6 +10,8 @@
 import { useState } from 'react'
 import { useSession } from 'next-auth/react'
 import { apiClient } from '@/lib/api-client'
+import { CACHE_TAGS } from '@/lib/cache-tags'
+import { revalidateAdminCache } from '@/lib/revalidate'
 
 interface CodDepositFormProps {
   /** Valor inicial en centavos COP, leído desde la BD al cargar la página. */
@@ -35,6 +37,8 @@ export function CodDepositForm({ initialCents }: CodDepositFormProps) {
         '/admin/settings/cod-deposit',
         { amountCents: Math.round(value * 100) },
       )
+      // Las políticas legales muestran este monto y lo cachean con el tag `settings`.
+      if (res.ok) await revalidateAdminCache([CACHE_TAGS.settings])
       setMessage(res.ok
         ? { ok: true, text: value === 0 ? 'Anticipo desactivado.' : 'Anticipo guardado.' }
         : { ok: false, text: 'No se pudo guardar. Intenta de nuevo.' })
