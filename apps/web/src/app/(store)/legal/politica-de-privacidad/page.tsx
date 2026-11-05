@@ -170,12 +170,12 @@ export default function PoliticaDePrivacidadPage() {
             </a>{' '}
             o por WhatsApp al{' '}
             <a
-              href="https://wa.me/573152926609"
+              href="https://wa.me/573143371099"
               className="text-[var(--c-accent)] underline hover:text-[var(--c-accent-hover)]"
               target="_blank"
               rel="noopener noreferrer"
             >
-              +57 315 292 6609
+              +57 314 337 1099
             </a>
             .
           </p>

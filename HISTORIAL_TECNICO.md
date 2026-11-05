@@ -1050,3 +1050,19 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/web/src/components/store/AddToCartWithQuantity.tsx` y `apps/web/src/components/store/ProductCard.tsx` — se elimina la llamada a `open()` de `useCartDrawer` tras `addItem`; queda el toast "Agregado al carrito". El drawer sigue abriéndose con `CartIcon` (`toggle`).
 
 **Verificación:** `tsc --noEmit` y ESLint limpios en los archivos tocados. Pendiente: prueba visual (agregar desde la tarjeta y desde la ficha, y abrir el carrito con el ícono).
+
+---
+
+## 2026-11-04 — Nuevo número de WhatsApp (573143371099)
+
+**Problema/Motivo:** El negocio cambió su número de WhatsApp. Se reemplazó el anterior (`573152926609`) por el nuevo (`573143371099`, +57 314 337 1099) en todo el sitio.
+
+**Cambios:**
+
+- `apps/web/src/app/(store)/legal/{politica-de-envios,politica-de-cambios,politica-de-privacidad,terminos-y-condiciones}/page.tsx` — enlaces `wa.me` y texto del número en las cuatro políticas legales.
+- `apps/web/src/lib/receipt/ReceiptPdf.tsx` — teléfono que se imprime en el comprobante PDF.
+- `apps/web/src/components/store/PayWithAddiButton.tsx` — número por defecto cuando falta la variable de entorno.
+- Fuera del repo: `apps/web/.env.local` y `C:\Users\pagin\VSC-Business\motek-deploy\web.env.production` (`NEXT_PUBLIC_WHATSAPP_NUMBER`). El botón flotante, el pie de página y el resto de enlaces leen esa variable (`lib/contact.ts`).
+- Pendiente (manual): actualizar `NEXT_PUBLIC_WHATSAPP_NUMBER` en Vercel (Production) y redesplegar, porque las variables `NEXT_PUBLIC_*` se incrustan al construir. Sin eso el botón flotante y el pie de página siguen con el número anterior.
+
+**Verificación:** `tsc --noEmit` limpio en `apps/web`; búsqueda en el repo sin ocurrencias del número anterior (salvo este historial). El teléfono de contacto de la tienda (`STORE_PHONE_DISPLAY`, +57 316 759 3670) no se tocó.
