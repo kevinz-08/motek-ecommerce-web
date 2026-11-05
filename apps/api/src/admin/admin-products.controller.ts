@@ -6,7 +6,9 @@ import { FileInterceptor } from '@nestjs/platform-express'
 import { ApiBearerAuth, ApiConsumes, ApiOperation, ApiTags } from '@nestjs/swagger'
 import {
   IProductRepository,
+  IProductDuplicator,
   IProductDescriptionRepository,
+  DuplicateProduct,
   UpsertProductDescription,
   validateProductPricing,
 } from '@motek/domain'
@@ -32,7 +34,7 @@ const ERROR_HTTP_STATUS: Record<string, number> = {
 @Controller('admin/products')
 export class AdminProductsController {
   constructor(
-    @Inject(PRODUCT_REPOSITORY) private readonly productRepo: IProductRepository,
+    @Inject(PRODUCT_REPOSITORY) private readonly productRepo: IProductRepository & IProductDuplicator,
     @Inject(PRODUCT_DESCRIPTION_REPOSITORY) private readonly descRepo: IProductDescriptionRepository,
     private readonly cloudinary: CloudinaryService,
   ) {}
@@ -61,6 +63,18 @@ export class AdminProductsController {
       lengthCm: dto.lengthCm ?? null,
       compatible: dto.compatible?.map((c) => ({ id: '', brand: c.brand, model: c.model, year: c.year ?? null })),
     })
+  }
+
+  @Post(':id/duplicate')
+  @HttpCode(201)
+  @ApiOperation({ summary: 'Duplicar producto (copia inactiva, stock 0, SKU/slug únicos)' })
+  async duplicate(@Param('id') id: string) {
+    const result = await new DuplicateProduct(this.productRepo).execute(id)
+    if (!result.ok) {
+      const status = ERROR_HTTP_STATUS[result.error.code] ?? 500
+      throw new HttpException(result.error.message, status)
+    }
+    return { id: result.value.id, name: result.value.name }
   }
 
   @Put(':id')
