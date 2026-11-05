@@ -24,7 +24,7 @@ interface PayWithAddiButtonProps {
 }
 
 function buildWhatsappUrl(product: Product): string {
-  const number = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? '573152926609'
+  const number = process.env.NEXT_PUBLIC_WHATSAPP_NUMBER ?? '573143371099'
   const lines = [
     `¡Hola!`,
     ``,

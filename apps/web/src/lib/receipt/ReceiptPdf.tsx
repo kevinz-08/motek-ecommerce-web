@@ -130,7 +130,7 @@ const ISSUER = {
   nit: '1007784964-5',
   address: 'Boulevard Santander #23-31, Bucaramanga, Santander',
   email: 'motekdev@gmail.com',
-  phone: '+57 315 292 6609',
+  phone: '+57 314 337 1099',
 }
 
 function formatCOP(cents: number): string {
