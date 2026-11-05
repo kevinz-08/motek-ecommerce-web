@@ -25,7 +25,6 @@ import Image from 'next/image'
 import { toast } from 'sonner'
 import { Product } from '@motek/domain'
 import { useCart } from '@/lib/cart'
-import { useCartDrawer } from '@/lib/cart-drawer'
 import { cloudinaryUrl, IMAGE_BLUR_PLACEHOLDER } from '@/lib/cloudinary'
 import { PriceTag } from './PriceTag'
 import { Card, Badge } from '@/components/ui'
@@ -49,7 +48,6 @@ interface ProductCardProps {
  */
 function CartHoverButton({ product }: { product: Product }) {
   const { addItem }    = useCart()
-  const { open }       = useCartDrawer()
   const [added, setAdded] = useState(false)
   const timerRef       = useRef<ReturnType<typeof setTimeout> | null>(null)
 
@@ -64,7 +62,6 @@ function CartHoverButton({ product }: { product: Product }) {
     if (added) return          // evitar doble click durante animación
     addItem(product, 1)
     toast.success('Agregado al carrito', { description: product.name })
-    open()
     setAdded(true)
     timerRef.current = setTimeout(() => setAdded(false), 1800)
   }

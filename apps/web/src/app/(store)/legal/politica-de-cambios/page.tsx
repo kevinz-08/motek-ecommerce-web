@@ -1,4 +1,5 @@
 import type { Metadata } from 'next'
+import { getCachedCodDepositCents } from '@/lib/cache'
 
 export const metadata: Metadata = {
   title: 'Política de Cambios y Devoluciones',
@@ -8,7 +9,10 @@ export const metadata: Metadata = {
   robots: { index: true, follow: true },
 }
 
-export default function PoliticaDeCambiosPage() {
+export default async function PoliticaDeCambiosPage() {
+  // Monto del anticipo de contraentrega (0 = sin anticipo): la viñeta solo aparece si está activo.
+  const depositCents = await getCachedCodDepositCents()
+
   return (
     <>
       {/* Encabezado */}
@@ -20,7 +24,7 @@ export default function PoliticaDeCambiosPage() {
           Política de Cambios, Devoluciones y Reembolsos
         </h1>
         <p className="text-sm text-gray-400 mt-2">
-          Última actualización: <time dateTime="2026-06-01">01 de junio de 2026</time>
+          Última actualización: <time dateTime="2026-11-04">04 de noviembre de 2026</time>
         </p>
       </header>
 
@@ -70,6 +74,20 @@ export default function PoliticaDeCambiosPage() {
               sin causa justificada, se le cobrará el valor total del flete de
               ida y regreso.
             </li>
+            {depositCents > 0 && (
+              <li>
+                En los pedidos contra entrega con anticipo, ese anticipo se retiene
+                cuando el pedido es rechazado o no se recibe sin causa justificada, y
+                cubre el flete de ida y regreso. Las condiciones completas están en la{' '}
+                <a
+                  href="/legal/politica-de-envios#seccion-contraentrega"
+                  className="text-[var(--c-accent)] underline hover:text-[var(--c-accent-hover)]"
+                >
+                  Política de Envíos
+                </a>
+                .
+              </li>
+            )}
             <li>
               Si el cliente decide devolver los productos a través de medios no
               autorizados, MOTEK STORE podrá cargarle los gastos extras en

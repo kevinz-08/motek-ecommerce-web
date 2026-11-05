@@ -1008,3 +1008,45 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 **Verificación:** `tsc --noEmit` limpio en api y web; tests de dominio 193/193 y de API 324/324; ESLint sin errores.
 
 **Despliegue / pendiente:** (1) Desplegar API y web **antes** de aplicar las migraciones, o aplicar las dos primeras justo con el deploy: el código nuevo entiende `COD_CONFIRMED`, el viejo no. (2) Aplicar `prisma migrate deploy` (incluye la migración del precio ancla). (3) Validar con un pedido real en Venndelo los decimales del `unit_price` prorrateado y el valor a recaudar antes de activar el anticipo. (4) Pendientes heredados de TDK: correo recordatorio del anticipo, política legal de devolución/retención del anticipo (revisión legal, Ley 1480) y E2E con el sandbox de Wompi.
+
+---
+
+## 2026-11-04 — Despliegue de la API con el anticipo COD y la guía Vendelo, y limpieza del catálogo de producción
+
+**Problema/Motivo:** En pruebas, el checkout no pedía anticipo y el admin mostraba `Cannot GET …/shipping-status`: la API de Cloud Run seguía con el código anterior (los COD nacían `PAID`). Además se pidió dejar un solo producto por categoría y borrar los pedidos de prueba antes del lanzamiento.
+
+**Cambios:**
+
+- Infraestructura (sin cambios de código): migraciones aplicadas a producción por el usuario (precio tachado y estados/anticipo COD); imagen `motek-api:1fafb79` construida con Cloud Build y desplegada en Cloud Run como revisión `motek-api-00005-bz5` (100 % del tráfico, variables y secretos conservados). `/health` ok y la ruta `shipping-status` pasó de 404 a 401 sin credenciales.
+- `packages/database/prisma/limpiar-productos.ts` (nuevo) — deja un producto por categoría (activo y con stock, el más reciente) y borra el resto; simulación por defecto, `--confirmar` para borrar; se niega a seguir si un producto sobrante tiene pedidos.
+- Datos de producción (ejecución puntual, borrado definitivo, sin snapshot por decisión del usuario): `limpiar-pedidos-prueba.ts --confirmar` borró 2 pedidos de prueba (con pagos y colas) y `limpiar-productos.ts --confirmar` borró 27 de 33 productos; quedan 6, uno por categoría.
+
+**Verificación:** simulación previa revisada con el usuario; tras borrar, una nueva simulación reporta 6 productos conservados y 0 por borrar. Pendiente: anular en Venndelo el pedido de prueba `#YETRUU8I`, invalidar la caché de la tienda y limpiar las imágenes huérfanas en Cloudinary.
+
+---
+
+## 2026-11-04 — Notificaciones a la izquierda y anticipo COD en las políticas legales
+
+**Problema/Motivo:** Los toasts aparecían abajo a la derecha (donde también está el botón de WhatsApp) y las políticas no explicaban el anticipo de contraentrega ni cuándo se devuelve.
+
+**Cambios:**
+
+- `apps/web/src/app/layout.tsx` — `Toaster` en `bottom-left`, con `mobileOffset` de 80 px para no tapar la barra fija "Agregar" de la ficha de producto en móvil.
+- `apps/web/src/lib/cache-tags.ts`, `apps/web/src/lib/cache.ts` — tag `settings` y `getCachedCodDepositCents()` (lee `COD_DEPOSIT_AMOUNT`, TTL 1 h).
+- `apps/web/src/components/admin/CodDepositForm.tsx` — al guardar, invalida el tag `settings` para que las políticas muestren el monto nuevo.
+- `apps/web/src/app/(store)/legal/politica-de-envios/page.tsx` — nueva sección 7 "Pago Contra Entrega y Anticipo" (id `seccion-contraentrega`): el monto sale del ajuste; con el anticipo en 0 solo describe el pago contra entrega. Reglas: se devuelve completo si el cliente cancela antes del despacho o la tienda no puede despachar / falla de garantía; se retiene si rechaza el pedido o no lo recibe sin causa justificada (cubre el flete de ida y regreso); sin pago en 24 h el pedido se cancela sin cobro; el retiro en tienda está exento. Fecha de actualización: 4 de noviembre de 2026.
+- `apps/web/src/app/(store)/legal/politica-de-cambios/page.tsx` — viñeta sobre la retención del anticipo (solo si está activo), enlazada a la sección 7.
+
+**Verificación:** `tsc --noEmit` y ESLint limpios en los archivos tocados. **Pendiente:** revisión legal del texto de retención del anticipo (derecho de retracto, Ley 1480) antes de activar un monto; prueba visual de los toasts en escritorio y móvil.
+
+---
+
+## 2026-11-04 — El carrito (drawer) ya no se abre solo al agregar un producto
+
+**Problema/Motivo:** Al agregar un producto, el drawer del carrito se abría de inmediato e interrumpía la navegación. Ahora solo se abre cuando el cliente pulsa el ícono del carrito.
+
+**Cambios:**
+
+- `apps/web/src/components/store/AddToCartWithQuantity.tsx` y `apps/web/src/components/store/ProductCard.tsx` — se elimina la llamada a `open()` de `useCartDrawer` tras `addItem`; queda el toast "Agregado al carrito". El drawer sigue abriéndose con `CartIcon` (`toggle`).
+
+**Verificación:** `tsc --noEmit` y ESLint limpios en los archivos tocados. Pendiente: prueba visual (agregar desde la tarjeta y desde la ficha, y abrir el carrito con el ícono).

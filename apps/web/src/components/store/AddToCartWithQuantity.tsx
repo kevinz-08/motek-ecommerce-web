@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { Product } from '@motek/domain'
 import { toast } from 'sonner'
 import { useCart } from '@/lib/cart'
-import { useCartDrawer } from '@/lib/cart-drawer'
 import { Button } from '@/components/ui'
 
 interface AddToCartWithQuantityProps {
@@ -15,7 +14,6 @@ interface AddToCartWithQuantityProps {
 
 export function AddToCartWithQuantity({ product, compact = false }: AddToCartWithQuantityProps) {
   const { addItem } = useCart()
-  const { open } = useCartDrawer()
   const [quantity, setQuantity] = useState(1)
 
   if (product.stock === 0) {
@@ -31,7 +29,6 @@ export function AddToCartWithQuantity({ product, compact = false }: AddToCartWit
   const handleAdd = () => {
     addItem(product, quantity)
     toast.success('Agregado al carrito', { description: product.name })
-    open()
   }
 
   // El modo no-compacto solo se usa dentro de wrappers `hidden md:block` (desktop),

@@ -286,3 +286,19 @@ export const getCachedRelatedProducts = unstable_cache(
   ['related-products'],
   { revalidate: 300, tags: [CACHE_TAGS.products] },
 )
+
+// ── Ajustes públicos (políticas) ──────────────────────────────────────────────
+
+/**
+ * Anticipo pre-envío de contraentrega en centavos COP (Settings.COD_DEPOSIT_AMOUNT).
+ * 0 / sin fila = sin anticipo. Lo leen las políticas legales para mostrar el monto vigente;
+ * se invalida con el tag `settings` cuando el admin lo cambia (CodDepositForm).
+ */
+export const getCachedCodDepositCents = unstable_cache(
+  async (): Promise<number> => {
+    const row = await prisma.settings.findUnique({ where: { key: 'COD_DEPOSIT_AMOUNT' } })
+    return Math.max(0, parseInt(row?.value ?? '0', 10) || 0)
+  },
+  ['cod-deposit-cents'],
+  { revalidate: 3600, tags: [CACHE_TAGS.settings] },
+)
