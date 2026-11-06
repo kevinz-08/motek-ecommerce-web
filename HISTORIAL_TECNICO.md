@@ -1110,3 +1110,16 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/web/src/app/(store)/producto/[slug]/page.tsx` — usa `ProductBuyBox`; solo se renderiza con stock > 0.
 
 **Verificación:** `tsc --noEmit` y ESLint limpios en `apps/web`; el helper de fechas se probó con `node` (5-nov-2026 → enviado 6–10 nov, entregado 11–18 nov; salta festivos y Semana Santa). **Pendiente:** revisión visual en móvil/desktop y confirmar los rangos de días con la operación real de la tienda. `apps/web` no tiene runner de pruebas unitarias, por eso el helper no tiene test en repo.
+
+## 2026-11-05 — Fix desbordamiento horizontal en móvil (home y catálogo) y guía de tamaño de banners
+
+**Problema/Motivo:** Al hacer zoom out en móvil, la home y `/catalogo` se veían rotas (contenido a la izquierda y espacio vacío a la derecha) porque algún elemento era más ancho que la pantalla. Además el admin no indicaba qué dimensiones usar en los banners del Hero.
+
+**Cambios:**
+
+- `apps/web/src/components/nav/Navbar.tsx` — en el header del catálogo, `min-w-0` en el form y el input del buscador y menos padding horizontal en móvil; el ancho mínimo intrínseco del input empujaba la fila más allá del viewport.
+- `apps/web/src/components/store/AccessoriesSpotlight.tsx` — `grid-cols-[minmax(0,1fr)]` en móvil y `min-w-0` en la columna del carrusel; el grid se ensanchaba al ancho total del `CenterModeCarousel`.
+- `apps/web/src/app/globals.css` — `overflow-x: clip` en `body` como red de seguridad (clip y no hidden para no romper el header sticky).
+- `BannerManager.tsx` y `help-content/banners.ts` — tamaños recomendados: desktop 1920×700, mobile 900×1400.
+
+**Verificación:** solo type-check/lint (ver resultado en la sesión). **Pendiente:** confirmar visualmente en móvil real con zoom out; las causas se identificaron por lectura de código, no se midió el DOM en el navegador.
