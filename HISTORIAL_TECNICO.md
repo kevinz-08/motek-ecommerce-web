@@ -1066,3 +1066,31 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - Pendiente (manual): actualizar `NEXT_PUBLIC_WHATSAPP_NUMBER` en Vercel (Production) y redesplegar, porque las variables `NEXT_PUBLIC_*` se incrustan al construir. Sin eso el botón flotante y el pie de página siguen con el número anterior.
 
 **Verificación:** `tsc --noEmit` limpio en `apps/web`; búsqueda en el repo sin ocurrencias del número anterior (salvo este historial). El teléfono de contacto de la tienda (`STORE_PHONE_DISPLAY`, +57 316 759 3670) no se tocó.
+
+---
+
+## 2026-11-05 — Duplicar producto desde el admin
+
+**Problema/Motivo:** Crear productos casi idénticos (misma ficha, otra referencia) obligaba a rellenar el formulario desde cero. Se agrega la acción "Duplicar" en `/admin/productos`.
+
+**Cambios:**
+
+- `packages/domain/src/use-cases/products/DuplicateProduct.ts` y `shared/duplicateIdentity.ts` — use case y generador de identidad de la copia (`X (Copia)`, `x-copia`, `SKU-COPIA`; luego `(Copia 2)`, `-copia-2`, `-COPIA-2`, sin encadenar sufijos). Reintenta ante conflicto (máx. 10) y rechaza productos en la papelera.
+- `packages/domain/src/repositories/IProductRepository.ts` — nuevo contrato `IProductDuplicator` (aparte de `IProductRepository` para no obligar al repositorio duplicado de `apps/web` a implementarlo). Exportado desde `index.ts`.
+- `packages/domain/src/__tests__/DuplicateProduct.test.ts` — 10 pruebas.
+- `apps/api/src/infrastructure/repositories/PrismaProductRepository.ts` — `createDuplicate`: un único `create` anidado (atómico) que copia campos, imágenes (las mismas URLs de Cloudinary), compatibilidad, descripción estructurada y un historial de precio nuevo `ADMIN_CREATE`. La copia nace `isActive: false` y `stock: 0`. `P2002` → `'CONFLICT'` (la BD valida slug/SKU, incluidas filas en la papelera).
+- `apps/api/src/admin/admin-products.controller.ts` — `POST /admin/products/:id/duplicate` (ADMIN); devuelve `{ id, name }`.
+- `apps/web/src/components/admin/DuplicateProductButton.tsx` (nuevo) y `ProductosTable.tsx` — botón "Duplicar" siempre visible a la izquierda de "Editar", con modal de confirmación y avisos (inactiva, stock 0, SKU/slug provisionales, imágenes compartidas). Tras duplicar redirige a `/admin/productos/{id}?duplicado=1`.
+- `apps/web/src/app/admin/productos/[id]/page.tsx` — con `?duplicado=1` muestra un recordatorio persistente (activar, ajustar stock, cambiar SKU/slug).
+
+**Verificación:** `vitest` de dominio (10 pruebas nuevas) y de API (324) en verde; `tsc --noEmit` limpio en domain, api y web; ESLint limpio en los archivos web tocados. **Pendiente:** prueba manual en un entorno con BD (duplicar, duplicar la copia, slug ocupado por un producto en la papelera); no se ejecutó `createDuplicate` contra una BD real. Si algún día se limpian imágenes huérfanas en Cloudinary, hay que contar referencias entre productos (la copia comparte URLs).
+
+## 2026-11-05 — Actualizar NIT del emisor en el comprobante
+
+**Problema/Motivo:** El NIT de la tienda cambió a 900972271; el comprobante PDF mostraba el anterior.
+
+**Cambios:**
+
+- `apps/web/src/lib/receipt/ReceiptPdf.tsx` — `ISSUER.nit` pasa de `1007784964-5` a `900972271` (único lugar del repo donde figuraba el NIT del emisor).
+
+**Verificación:** búsqueda en todo el repo del NIT anterior sin coincidencias restantes. No se generó un PDF de prueba.

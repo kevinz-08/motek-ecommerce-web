@@ -11,6 +11,7 @@
  *   Los use cases siguen funcionando sin cambios.
  */
 import { Product, ProductFilters } from '@/domain/entities/Product'
+import type { DuplicateIdentity } from '@/domain/shared/duplicateIdentity'
 
 /**
  * Resultado paginado del listado de productos.
@@ -64,4 +65,19 @@ export interface IProductRepository {
   restore(id: string): Promise<void>
   /** Lista productos soft-deleted (papelera). Solo para el panel admin. */
   findDeleted(): Promise<Product[]>
+}
+
+/**
+ * Duplicación atómica de productos. Contrato aparte de IProductRepository: solo lo
+ * implementa el repositorio de la API (la escritura admin vive en NestJS).
+ */
+export interface IProductDuplicator {
+  /**
+   * Crea, en una sola transacción, la copia de `sourceId` (campos, imágenes, compatibilidad,
+   * descripción estructurada e historial de precio inicial) con la identidad dada,
+   * inactiva y con stock 0.
+   * Retorna `null` si el origen no existe o está en la papelera, y `'CONFLICT'` si el
+   * slug o el SKU ya existen (incluidos los productos en la papelera).
+   */
+  createDuplicate(sourceId: string, identity: DuplicateIdentity): Promise<Product | 'CONFLICT' | null>
 }

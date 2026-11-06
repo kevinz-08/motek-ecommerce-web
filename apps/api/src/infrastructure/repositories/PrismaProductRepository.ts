@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common'
 import {
   IProductRepository,
+  IProductDuplicator,
+  DuplicateIdentity,
   PaginatedProducts,
   Product,
   ProductFilters,
@@ -45,7 +47,7 @@ function toDomain(p: PrismaProductRow): Product {
 }
 
 @Injectable()
-export class PrismaProductRepository implements IProductRepository {
+export class PrismaProductRepository implements IProductRepository, IProductDuplicator {
   constructor(private readonly prisma: PrismaService) {}
 
   async findById(id: string): Promise<Product | null> {
@@ -192,6 +194,53 @@ export class PrismaProductRepository implements IProductRepository {
       })
     }
     return toDomain(p)
+  }
+
+  async createDuplicate(sourceId: string, identity: DuplicateIdentity): Promise<Product | 'CONFLICT' | null> {
+    const src = await this.prisma.client.product.findFirst({
+      where: { id: sourceId, deletedAt: null },
+      include: {
+        compatible: true,
+        structuredDescription: { include: { benefits: true, compatibility: true } },
+      },
+    })
+    if (!src) return null
+
+    const desc = src.structuredDescription
+    try {
+      // Un solo create anidado: producto, compatibilidad, descripción estructurada e
+      // historial de precio se escriben juntos o no se escribe nada. La unicidad de
+      // slug/sku la valida la BD (incluye filas de la papelera).
+      const p = await this.prisma.client.product.create({
+        data: {
+          name: identity.name, slug: identity.slug, sku: identity.sku,
+          description: src.description,
+          price: src.price, compareAtPrice: src.compareAtPrice,
+          stock: 0, isActive: false,
+          images: src.images, categoryId: src.categoryId,
+          weightKg: src.weightKg, heightCm: src.heightCm,
+          widthCm: src.widthCm, lengthCm: src.lengthCm,
+          compatible: { create: src.compatible.map(({ brand, model, year }) => ({ brand, model, year })) },
+          priceHistory: {
+            create: { price: src.price, compareAtPrice: src.compareAtPrice, source: 'ADMIN_CREATE' },
+          },
+          ...(desc && {
+            structuredDescription: {
+              create: {
+                generalDescription: desc.generalDescription,
+                benefits: { create: desc.benefits.map(({ title, body, order }) => ({ title, body, order })) },
+                compatibility: { create: desc.compatibility.map(({ body, order }) => ({ body, order })) },
+              },
+            },
+          }),
+        },
+        include: { compatible: true },
+      })
+      return toDomain(p)
+    } catch (e) {
+      if ((e as { code?: string }).code === 'P2002') return 'CONFLICT'
+      throw e
+    }
   }
 
   async updateStock(id: string, newStock: number): Promise<void> {

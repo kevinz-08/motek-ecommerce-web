@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { DataTable, type DataTableColumn } from '@/components/admin/DataTable'
 import { DeleteProductButton } from '@/components/admin/DeleteProductButton'
+import { DuplicateProductButton } from '@/components/admin/DuplicateProductButton'
 import { formatCOP } from '@/lib/format'
 
 export interface ProductRow {
@@ -86,6 +87,7 @@ export function ProductosTable({
       cell: (p) => (
         <span className="flex items-center justify-end gap-3">
           <DeleteProductButton id={p.id} name={p.name} />
+          <DuplicateProductButton id={p.id} name={p.name} />
           <Link href={`/admin/productos/${p.id}`} className="text-xs text-[var(--c-text-3)] hover:text-[var(--c-text)] transition-colors font-medium">
             Editar →
           </Link>
