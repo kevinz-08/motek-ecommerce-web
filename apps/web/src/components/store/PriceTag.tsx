@@ -54,7 +54,9 @@ export function PriceTag({
       <span className={`${s.price} ${priceClassName} tracking-tight`}>
         {formatCOP(price * quantity)}
       </span>
-      <span className={`${s.compare} text-gray-400 line-through`}>
+      {/* `relative`: el sr-only es absolute; sin ancestro posicionado escapa de los
+          carruseles con overflow-x y ensancha la página (rompe el zoom out en móvil). */}
+      <span className={`relative ${s.compare} text-gray-400 line-through`}>
         <span className="sr-only">Antes </span>
         {formatCOP(compareAtPrice * quantity)}
       </span>
