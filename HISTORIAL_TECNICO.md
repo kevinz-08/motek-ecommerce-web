@@ -1123,3 +1123,13 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `BannerManager.tsx` y `help-content/banners.ts` — tamaños recomendados: desktop 1920×700, mobile 900×1400.
 
 **Verificación:** solo type-check/lint (ver resultado en la sesión). **Pendiente:** confirmar visualmente en móvil real con zoom out; las causas se identificaron por lectura de código, no se midió el DOM en el navegador.
+
+## 2026-11-05 — Fix real del desbordamiento en la home: sr-only de PriceTag escapaba de los carruseles
+
+**Problema/Motivo:** Tras el fix anterior `/catalogo` quedó bien, pero la home seguía ensanchándose al hacer zoom out en móvil. Medido en producción: los `<span class="sr-only">Antes </span>` de `PriceTag` (position absolute, sin ancestro posicionado) tomaban el ICB como bloque contenedor, así que no los recortaban ni el `overflow-x:auto` de los carruseles ni el `overflow-x:clip` del body, y se ubicaban a lo ancho de todo el carrusel.
+
+**Cambios:**
+
+- `apps/web/src/components/store/PriceTag.tsx` — `relative` en el `<span>` que envuelve el `sr-only`, para que quede contenido dentro de la tarjeta.
+
+**Verificación:** diagnóstico con JS en tiendamotek.com (spans sr-only absolutos con `left` 209…1265 sin ancestro posicionado). Type-check del cambio abajo. **Pendiente:** confirmar en celular tras el despliegue.
