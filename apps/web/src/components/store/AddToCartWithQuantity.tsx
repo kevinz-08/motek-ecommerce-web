@@ -10,11 +10,25 @@ interface AddToCartWithQuantityProps {
   product: Product
   /** Layout compacto para la sticky bottom bar mobile — stepper más angosto. */
   compact?: boolean
+  /** Cantidad controlada por el padre (PDP: la comparten el CTA inline y la barra fija). */
+  quantity?: number
+  onQuantityChange?: (quantity: number) => void
 }
 
-export function AddToCartWithQuantity({ product, compact = false }: AddToCartWithQuantityProps) {
+export function AddToCartWithQuantity({
+  product,
+  compact = false,
+  quantity: controlledQuantity,
+  onQuantityChange,
+}: AddToCartWithQuantityProps) {
   const { addItem } = useCart()
-  const [quantity, setQuantity] = useState(1)
+  const [localQuantity, setLocalQuantity] = useState(1)
+  const quantity = controlledQuantity ?? localQuantity
+  const setQuantity = (updater: (q: number) => number) => {
+    const next = updater(quantity)
+    setLocalQuantity(next)
+    onQuantityChange?.(next)
+  }
 
   if (product.stock === 0) {
     return (

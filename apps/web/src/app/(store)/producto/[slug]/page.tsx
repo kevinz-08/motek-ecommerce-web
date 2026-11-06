@@ -19,8 +19,9 @@
  *   - ProductImageGallery (Client Component): miniaturas verticales a la
  *     izquierda + zoom hover (desktop) / lightbox a pantalla completa (tap).
  *   - SKU, nombre, precio, TrustBadgeRow y UrgencyStockCounter (umbral ≤5).
- *   - AddToCartWithQuantity + PayWithAddiButton — ocultos en mobile
- *     (`hidden md:block`), reemplazados por StickyBuyBar (fixed bottom-0).
+ *   - ProductBuyBox: CTA inline (cantidad, agregar, Addi), cotizador de envío,
+ *     línea de tiempo de entrega y medios de pago. En mobile, StickyBuyBar
+ *     (fixed bottom-0) entra cuando el CTA inline sale de pantalla.
  *
  * Zona "informarse" (ProductInfoSection):
  *   - Descripción y beneficios (editable desde el admin).
@@ -32,15 +33,12 @@ import { Suspense } from 'react'
 import { notFound } from 'next/navigation'
 import { prisma } from '@motek/database'
 import { getCachedProductBySlug } from '@/lib/cache'
-import { AddToCartWithQuantity } from '@/components/store/AddToCartWithQuantity'
-import { PayWithAddiButton } from '@/components/store/PayWithAddiButton'
+import { ProductBuyBox } from '@/components/store/ProductBuyBox'
 import { ProductImageGallery } from '@/components/store/ProductImageGallery'
 import { Breadcrumb } from '@/components/store/Breadcrumb'
 import { TrustBadgeRow } from '@/components/store/TrustBadgeRow'
 import { UrgencyStockCounter } from '@/components/store/UrgencyStockCounter'
 import { LiveViewersCounter } from '@/components/store/LiveViewersCounter'
-import { PaymentMethodsRow } from '@/components/store/PaymentMethodsRow'
-import { StickyBuyBar } from '@/components/store/StickyBuyBar'
 import { PriceTag } from '@/components/store/PriceTag'
 import { ProductInfoSection } from '@/components/store/ProductInfoSection'
 import {
@@ -153,17 +151,11 @@ export default async function ProductPage({ params }: PageProps) {
             )}
           </div>
 
-          {/* CTA principal — oculto en mobile, reemplazado por StickyBuyBar */}
-          <div className="hidden md:block">
-            <AddToCartWithQuantity product={product} />
-
-            {/* Alternativa de pago — texto que conduce a WhatsApp con consulta pre-armada. */}
-            <div className="mt-3">
-              <PayWithAddiButton product={product} className="text-sm md:text-[13px] c-text-2" />
-            </div>
-
-            <PaymentMethodsRow />
-          </div>
+          {/* CTA principal (inline en todos los breakpoints). En mobile, la barra fija
+              inferior entra cuando este bloque sale de pantalla. */}
+          {product.stock > 0 && (
+            <ProductBuyBox product={product} formattedPrice={formatCOP(product.price)} />
+          )}
         </div>
       </div>
 
@@ -183,8 +175,6 @@ export default async function ProductPage({ params }: PageProps) {
       </Suspense>
     </div>
 
-    {/* Sticky bottom bar — solo mobile */}
-    <StickyBuyBar product={product} formattedPrice={formatCOP(product.price)} />
     </div>
   )
 }

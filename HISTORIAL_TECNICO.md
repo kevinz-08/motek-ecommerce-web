@@ -1094,3 +1094,19 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/web/src/lib/receipt/ReceiptPdf.tsx` — `ISSUER.nit` pasa de `1007784964-5` a `900972271` (único lugar del repo donde figuraba el NIT del emisor).
 
 **Verificación:** búsqueda en todo el repo del NIT anterior sin coincidencias restantes. No se generó un PDF de prueba.
+
+## 2026-11-05 — PDP: CTA inline en móvil, línea de tiempo de entrega y cotizador de envío
+
+**Problema/Motivo:** Se traen al PDP funcionalidades de electro-motos-tdk: en móvil el CTA (cantidad + agregar + Addi) solo existía como barra fija; faltaban la línea de tiempo de entrega y el costo de envío por ciudad.
+
+**Cambios:**
+
+- `apps/web/src/components/store/ProductBuyBox.tsx` (nuevo) — zona de compra para todos los breakpoints: CTA inline, cotizador, línea de tiempo y medios de pago. Comparte la cantidad con la barra fija y usa un `IntersectionObserver` para mostrar la barra solo cuando el CTA inline sale de pantalla.
+- `StickyBuyBar.tsx` — ahora recibe `visible`/`quantity`/`onQuantityChange`; entra con `translate-y` y queda `inert` mientras está oculta.
+- `AddToCartWithQuantity.tsx` — cantidad controlada opcional (sigue funcionando sin props nuevas).
+- `PayWithAddiButton.tsx` — pasa de enlace de texto a botón azul Addi a ancho completo (mismo enlace a WhatsApp); se elimina el texto "¿Prefieres pagar con Addi? Contacta con nuestra línea…".
+- `DeliveryTimeline.tsx` + `lib/delivery-estimate.ts` (nuevos) — Pedido → Enviado → Entregado con líneas punteadas rojas (`--c-accent`). Fechas en días hábiles colombianos (festivos con Ley Emiliani y Semana Santa), calculadas en el cliente por ser página ISR. Rangos constantes: enviado +1–3, entregado +4–8 días hábiles.
+- `ProductShippingEstimator.tsx` (nuevo) — "¿Cuánto cuesta el envío a tu ciudad?" con `CitySelector` y `useShippingQuote`; comparte `selectedCity` con carrito/checkout.
+- `apps/web/src/app/(store)/producto/[slug]/page.tsx` — usa `ProductBuyBox`; solo se renderiza con stock > 0.
+
+**Verificación:** `tsc --noEmit` y ESLint limpios en `apps/web`; el helper de fechas se probó con `node` (5-nov-2026 → enviado 6–10 nov, entregado 11–18 nov; salta festivos y Semana Santa). **Pendiente:** revisión visual en móvil/desktop y confirmar los rangos de días con la operación real de la tienda. `apps/web` no tiene runner de pruebas unitarias, por eso el helper no tiene test en repo.
