@@ -22,7 +22,7 @@ export function AccessoriesSpotlight({ products }: AccessoriesSpotlightProps) {
 
   return (
     <section className="py-20 px-4 bg-[var(--c-surface)] border-t border-[var(--c-border)]">
-      <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-12 lg:items-center">
+      <div className="max-w-7xl mx-auto grid grid-cols-[minmax(0,1fr)] lg:grid-cols-2 gap-10 lg:gap-12 lg:items-center">
 
         {/* Columna banner — arriba en mobile, izquierda en desktop.
             aspect-[800/654] coincide con las dimensiones reales del archivo
@@ -43,7 +43,7 @@ export function AccessoriesSpotlight({ products }: AccessoriesSpotlightProps) {
         </Link>
 
         {/* Columna carrusel — abajo en mobile, derecha en desktop */}
-        <div className="order-2 flex flex-col justify-center">
+        <div className="order-2 min-w-0 flex flex-col justify-center">
           <div className="mb-10">
             <h2 className="text-3xl md:text-4xl font-black uppercase tracking-tight text-[var(--c-text)]">
               Accesorios para tu moto

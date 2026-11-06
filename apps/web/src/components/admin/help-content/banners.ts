@@ -11,6 +11,7 @@ export const bannersHelpContent: AdminHelpContent = {
     'Solo los banners marcados como "Activo" se muestran en la home — puedes crear banners de promociones futuras y activarlos cuando llegue la fecha, sin borrarlos.',
     'Hay un máximo de 8 banners activos a la vez, para no sobrecargar el carrusel. Si lo alcanzas, desactiva uno antes de activar otro.',
     'Las flechas ▲▼ cambian el orden de aparición en el carrusel — el primero de la tabla es el primero que se ve al cargar la home.',
+    'Tamaño recomendado: imagen desktop 1920 × 700 px (proporción ≈ 2.75:1, contenido importante en el centro porque en pantallas más angostas se recortan los lados). Imagen mobile 900 × 1400 px (≈ 9:14), dejando ~80 px libres abajo para las flechas y los puntos. Formatos JPG, PNG o WEBP, máximo 5 MB.',
     'El destino de click es opcional: si eliges "No clickeable", la imagen es puramente decorativa.',
     'La URL de destino puede ser una ruta interna del sitio (ej. "/catalogo?category=llantas") o una URL externa completa (ej. "https://wa.me/...").',
     'Si borras todos los banners, el Hero de la home simplemente no se muestra — el resto de la página sigue funcionando normal.',

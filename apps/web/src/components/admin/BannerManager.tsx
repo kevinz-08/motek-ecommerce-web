@@ -363,6 +363,7 @@ const BannerForm = forwardRef<BannerFormHandle, BannerFormProps>(function Banner
                   <ImagePlus className="w-6 h-6 text-[var(--c-text-4)]" />
                   <span className="text-[length:var(--text-body-sm)] text-[var(--c-text-3)]">Haz clic para subir la imagen</span>
                   <span className="text-xs text-[var(--c-text-4)]">JPG, PNG, WEBP · Máx. 5 MB</span>
+                  <span className="text-xs text-[var(--c-text-4)]">Recomendado: 1920 × 700 px (contenido en el centro)</span>
                 </>
               )}
             </label>
@@ -377,7 +378,7 @@ const BannerForm = forwardRef<BannerFormHandle, BannerFormProps>(function Banner
           Imagen mobile (opcional)
         </label>
         <p className="text-xs text-[var(--c-text-4)] mb-1.5">
-          Si no se sube, el carrusel usa la imagen de arriba también en mobile.
+          Si no se sube, el carrusel usa la imagen de arriba también en mobile (recortada). Recomendado: 900 × 1400 px, con ~80 px libres abajo para las flechas.
         </p>
 
         {imageMobile ? (
