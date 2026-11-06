@@ -432,18 +432,18 @@ export function Navbar({ categories, motorcycleBrands }: NavbarProps) {
               </Link>
 
               {/* Buscador central */}
-              <form onSubmit={handleCatalogSearch} className="flex-1 flex items-center max-w-2xl mx-auto">
+              <form onSubmit={handleCatalogSearch} className="flex-1 min-w-0 flex items-center max-w-2xl mx-auto">
                 <div className="flex w-full rounded-full overflow-hidden border border-[var(--c-border)] bg-[var(--c-surface)] focus-within:border-[var(--c-accent)] transition-colors">
                   <input
                     type="text"
                     value={catalogSearch}
                     onChange={(e) => setCatalogSearch(e.target.value)}
                     placeholder="Buscar productos..."
-                    className="flex-1 bg-transparent text-[var(--c-text)] placeholder-[var(--c-text-3)] text-sm px-5 py-2.5 focus:outline-none"
+                    className="flex-1 min-w-0 bg-transparent text-[var(--c-text)] placeholder-[var(--c-text-3)] text-sm px-4 sm:px-5 py-2.5 focus:outline-none"
                   />
                   <button
                     type="submit"
-                    className="shrink-0 bg-[var(--c-surface-2)] hover:bg-[var(--c-surface-hover)] transition-colors px-5 flex items-center justify-center"
+                    className="shrink-0 bg-[var(--c-surface-2)] hover:bg-[var(--c-surface-hover)] transition-colors px-4 sm:px-5 flex items-center justify-center"
                     aria-label="Buscar"
                   >
                     <svg className="w-4 h-4 text-[var(--c-text-2)]" fill="none" stroke="currentColor" viewBox="0 0 24 24">

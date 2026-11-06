@@ -281,6 +281,9 @@
 }
 
 body {
+  /* Red de seguridad: ningún hijo desbordado debe ensanchar el viewport en móvil
+     (rompe el zoom out). `clip` y no `hidden` para no romper position: sticky. */
+  overflow-x: clip;
   background: var(--c-bg);
   color: var(--c-text);
   font-family: var(--font-roboto), system-ui, sans-serif;
