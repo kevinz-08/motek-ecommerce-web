@@ -127,7 +127,7 @@ export interface ReceiptData {
 // Cuando se mude o se incorpore, basta con editar este objeto.
 const ISSUER = {
   name: 'Motek Store',
-  nit: '1007784964-5',
+  nit: '900972271',
   address: 'Boulevard Santander #23-31, Bucaramanga, Santander',
   email: 'motekdev@gmail.com',
   phone: '+57 314 337 1099',

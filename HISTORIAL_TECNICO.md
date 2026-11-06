@@ -1084,3 +1084,13 @@ Para minimizar ese riesgo sin dejar de cumplir lo pedido: la compatibilidad se c
 - `apps/web/src/app/admin/productos/[id]/page.tsx` — con `?duplicado=1` muestra un recordatorio persistente (activar, ajustar stock, cambiar SKU/slug).
 
 **Verificación:** `vitest` de dominio (10 pruebas nuevas) y de API (324) en verde; `tsc --noEmit` limpio en domain, api y web; ESLint limpio en los archivos web tocados. **Pendiente:** prueba manual en un entorno con BD (duplicar, duplicar la copia, slug ocupado por un producto en la papelera); no se ejecutó `createDuplicate` contra una BD real. Si algún día se limpian imágenes huérfanas en Cloudinary, hay que contar referencias entre productos (la copia comparte URLs).
+
+## 2026-11-05 — Actualizar NIT del emisor en el comprobante
+
+**Problema/Motivo:** El NIT de la tienda cambió a 900972271; el comprobante PDF mostraba el anterior.
+
+**Cambios:**
+
+- `apps/web/src/lib/receipt/ReceiptPdf.tsx` — `ISSUER.nit` pasa de `1007784964-5` a `900972271` (único lugar del repo donde figuraba el NIT del emisor).
+
+**Verificación:** búsqueda en todo el repo del NIT anterior sin coincidencias restantes. No se generó un PDF de prueba.
